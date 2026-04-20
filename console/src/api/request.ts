@@ -1,5 +1,6 @@
 import { getApiUrl, clearAuthToken } from "./config";
-import { buildAuthHeaders } from "./authHeaders";
+// Multi-tenant plugin auth headers (gracefully degrades when disabled)
+import { buildAuthHeaders } from "../multi_tenant/authHeaders";
 
 function getErrorMessageFromBody(
   text: string,
@@ -57,6 +58,25 @@ function buildHeaders(method?: string, extra?: HeadersInit): Headers {
   return headers;
 }
 
+/**
+ * Handle a 401 Unauthorized response.
+ *
+ * The default implementation clears the auth token and redirects to /login.
+ * Plugins (e.g. multi-tenant) may call `setHandle401()` to replace this
+ * with a custom handler that adds SSO cookie detection or extra session cleanup.
+ */
+let _handle401: () => void = () => {
+  clearAuthToken();
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+};
+
+/** Replace the 401 handler with a custom implementation. */
+export function setHandle401(fn: () => void): void {
+  _handle401 = fn;
+}
+
 export async function request<T = unknown>(
   path: string,
   options: RequestInit = {},
@@ -70,14 +90,11 @@ export async function request<T = unknown>(
     headers,
   });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      clearAuthToken();
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
+    if (!response.ok) {
+      if (response.status === 401) {
+        handle401();
+        throw new Error("Not authenticated");
       }
-      throw new Error("Not authenticated");
-    }
 
     const text = await response.text().catch(() => "");
     const contentType = response.headers.get("content-type") || "";

@@ -2,6 +2,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./i18n";
 
+// ── Multi-tenant plugin init (no-op when disabled) ─────────────────
+import { initializeMultiTenant } from "./multi_tenant";
+initializeMultiTenant();
+
 if (typeof window !== "undefined") {
   const originalError = console.error;
   const originalWarn = console.warn;

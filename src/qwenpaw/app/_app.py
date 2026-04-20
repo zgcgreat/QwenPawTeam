@@ -251,11 +251,22 @@ async def lifespan(
     logger.info("Initializing MultiAgentManager...")
     multi_agent_manager = MultiAgentManager()
 
+    # Plugin lifespan hooks: allow plugins to wrap the manager
+    from qwenpaw_plugins import run_lifespan_hooks
+    multi_agent_manager = await run_lifespan_hooks(
+        "post_manager_init", app, multi_agent_manager,
+    )
+
     # Start all configured agents (handled by manager)
     await multi_agent_manager.start_all_configured_agents()
 
     # --- Model provider manager (non-reloadable, in-memory) ---
     provider_manager = ProviderManager.get_instance()
+
+    # Plugin lifespan hooks: allow plugins to wrap the provider manager
+    provider_manager = await run_lifespan_hooks(
+        "post_provider_init", app, provider_manager,
+    )
 
     # --- Local model manager initialization ---
     local_model_manager = LocalModelManager.get_instance()
@@ -475,6 +486,27 @@ app = FastAPI(
     redoc_url="/redoc" if DOCS_ENABLED else None,
     openapi_url="/openapi.json" if DOCS_ENABLED else None,
 )
+
+# === Plugin Activation ===
+# Plugins registered via qwenpaw_plugins are activated here.
+# This is the ONLY modification to upstream source code for plugin support.
+import os as _os
+from qwenpaw_plugins import run_lifespan_hooks  # noqa: F401 — used in lifespan above
+
+if _os.environ.get("QWENPAW_MULTI_TENANT_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+):
+    from qwenpaw_plugins.multi_tenant import activate_multi_tenant
+
+    activate_multi_tenant(app)
+
+    # Re-import AuthMiddleware after patch_auth_module() has replaced it.
+    from qwenpaw.app import auth as _auth_module_reimport
+
+    AuthMiddleware = _auth_module_reimport.AuthMiddleware  # noqa: F811
+
 
 # Add agent context middleware for agent-scoped routes
 app.add_middleware(AgentContextMiddleware)

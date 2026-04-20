@@ -13,6 +13,14 @@ export default defineConfig(({ mode }) => {
       VITE_API_BASE_URL: JSON.stringify(apiBaseUrl),
       TOKEN: JSON.stringify(env.TOKEN || ""),
       MOBILE: false,
+      // ── Multi-tenant plugin flag ────────────────────────────────
+      // Set VITE_MULTI_TENANT_ENABLED=true to activate the console
+      // multi-tenant plugin (5-tuple login, SSO cookie auth, etc.).
+      VITE_MULTI_TENANT_ENABLED: JSON.stringify(
+        env.VITE_MULTI_TENANT_ENABLED === "true",
+      ),
+      // Optional: comma-separated SSO cookie names (overrides defaults)
+      VITE_SSO_COOKIE_NAMES: JSON.stringify(env.VITE_SSO_COOKIE_NAMES || ""),
     },
     plugins: [react()],
     css: {
@@ -34,6 +42,12 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: 5173,
+      proxy: {
+        "/api": {
+          target: env.VITE_API_BASE_URL || "http://localhost:8088",
+          changeOrigin: true,
+        },
+      },
     },
     optimizeDeps: {
       include: ["diff"],

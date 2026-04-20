@@ -37,6 +37,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
+def _resolve_workspace_base_dir() -> Path:
+    """Return the base directory for new agent workspaces.
+
+    Plugins (e.g. multi-tenant) may monkey-patch this function at
+    module level to return a tenant-specific directory instead of
+    the global ``WORKING_DIR``.
+    """
+    return WORKING_DIR
+
+
 class AgentSummary(BaseModel):
     """Agent summary information."""
 
@@ -310,8 +320,11 @@ async def create_agent(
     else:
         new_id = _generate_unique_id(existing_ids)
 
+    # Resolve the base directory for new workspaces.
+    _base_dir = _resolve_workspace_base_dir()
+
     workspace_dir = Path(
-        request.workspace_dir or f"{WORKING_DIR}/workspaces/{new_id}",
+        request.workspace_dir or f"{_base_dir}/workspaces/{new_id}",
     ).expanduser()
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -502,6 +515,19 @@ async def list_agent_files(
             MdFileInfo.model_validate(file)
             for file in workspace_manager.list_working_mds()
         ]
+
+        # If workspace has zero MD files, try to seed from templates
+        # (handles first-run without `qwenpaw init` or stale workspace)
+        if not files:
+            try:
+                workspace._ensure_md_files()
+            except Exception:
+                pass
+            files = [
+                MdFileInfo.model_validate(file)
+                for file in workspace_manager.list_working_mds()
+            ]
+
         return files
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

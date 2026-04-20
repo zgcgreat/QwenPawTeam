@@ -340,6 +340,14 @@ class Workspace:
                 f"Skill pool initialization failed (non-fatal): {e}",
             )
 
+        # Auto-seed MD files if workspace has none (e.g. first run without `qwenpaw init`)
+        try:
+            self._ensure_md_files()
+        except Exception as e:
+            logger.warning(
+                f"MD file seeding failed (non-fatal): {e}",
+            )
+
         try:
             # 1. Load agent configuration
             self._config = load_agent_config(self.agent_id)
@@ -379,6 +387,38 @@ class Workspace:
 
         self._started = False
         logger.info(f"Workspace stopped: {self.agent_id}")
+
+    def _ensure_md_files(self) -> None:
+        """Seed workspace MD files if none exist (e.g. first run without ``qwenpaw init``).
+
+        When the workspace directory has zero ``*.md`` files, we copy the
+        default templates from ``agents/md_files/<lang>/`` so that the
+        ``/agents/{id}/files`` endpoint always returns something useful.
+        """
+        if list(self.workspace_dir.glob("*.md")):
+            return  # already has MD files – nothing to do
+
+        from ...agents.utils import copy_md_files
+        from ...config import load_config
+
+        try:
+            config = load_config()
+            language = config.agents.language or "zh"
+        except Exception:
+            language = "zh"
+
+        copied = copy_md_files(
+            language,
+            skip_existing=True,
+            workspace_dir=self.workspace_dir,
+        )
+        if copied:
+            logger.info(
+                "Auto-seeded %d MD file(s) [%s] to %s",
+                len(copied),
+                language,
+                self.workspace_dir,
+            )
 
     def __repr__(self) -> str:
         """String representation of workspace."""

@@ -19,6 +19,10 @@ dayjs.extend(relativeTime);
 import MainLayout from "./layouts/MainLayout";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import LoginPage from "./pages/Login";
+// ── Multi-tenant plugin components (tree-shaken when disabled) ─────
+import { MULTI_TENANT_ENABLED } from "./multi_tenant";
+import MtLoginPage from "./multi_tenant/LoginPage";
+import MtAuthGuard from "./multi_tenant/AuthGuard";
 import { authApi } from "./api/modules/auth";
 import { languageApi } from "./api/modules/language";
 import { getApiUrl, getApiToken, clearAuthToken } from "./api/config";
@@ -46,7 +50,12 @@ const GlobalStyle = createGlobalStyle`
 }
 `;
 
-function AuthGuard({ children }: { children: React.ReactNode }) {
+/**
+ * Upstream (original) QwenPaw auth guard.
+ * Checks auth status → verifies token → redirects to /login if needed.
+ * Only used when MULTI_TENANT_ENABLED is false.
+ */
+function UpstreamAuthGuard({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "auth-required" | "ok">(
     "loading",
   );
@@ -102,6 +111,9 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   return <>{children}</>;
 }
+
+/** Select the appropriate auth guard at the Route level (no Hooks violations). */
+const ActiveAuthGuard = MULTI_TENANT_ENABLED ? MtAuthGuard : UpstreamAuthGuard;
 
 function getRouterBasename(pathname: string): string | undefined {
   return /^\/console(?:\/|$)/.test(pathname) ? "/console" : undefined;
@@ -168,13 +180,18 @@ function AppInner() {
       >
         <AntdApp>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/login"
+              element={
+                MULTI_TENANT_ENABLED ? <MtLoginPage /> : <LoginPage />
+              }
+            />
             <Route
               path="/*"
               element={
-                <AuthGuard>
+                <ActiveAuthGuard>
                   <MainLayout />
-                </AuthGuard>
+                </ActiveAuthGuard>
               }
             />
           </Routes>

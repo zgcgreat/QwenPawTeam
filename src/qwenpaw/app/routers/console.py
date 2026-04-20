@@ -109,6 +109,12 @@ async def post_console_chat(
     Stop via POST /console/chat/stop. Reconnect with body.reconnect=true.
     """
     workspace = await get_agent_for_request(request)
+    if workspace.channel_manager is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ChannelManager not initialized for this agent. "
+            "The agent may not have started correctly.",
+        )
     console_channel = await workspace.channel_manager.get_channel("console")
     if console_channel is None:
         raise HTTPException(
@@ -200,6 +206,11 @@ async def post_console_upload(
     """Save to console channel media_dir."""
 
     workspace = await get_agent_for_request(request)
+    if workspace.channel_manager is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ChannelManager not initialized for this agent.",
+        )
     console_channel = await workspace.channel_manager.get_channel("console")
     if console_channel is None:
         raise HTTPException(

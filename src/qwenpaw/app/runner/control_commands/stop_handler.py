@@ -69,11 +69,13 @@ class StopCommandHandler(BaseControlCommandHandler):
 
         stopped = await workspace.task_tracker.request_stop(chat_id)
 
-        cleared = await workspace.channel_manager.clear_queue(
-            channel_id,
-            target_session_id,
-            20,
-        )
+        cleared = 0
+        if workspace.channel_manager is not None:
+            cleared = await workspace.channel_manager.clear_queue(
+                channel_id,
+                target_session_id,
+                20,
+            )
 
         if stopped or cleared > 0:
             logger.info(
