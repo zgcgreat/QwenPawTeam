@@ -28,6 +28,7 @@ export interface DingTalkConfig extends BaseChannelConfig {
   card_template_id: string;
   card_template_key: string;
   robot_code: string;
+  at_sender_on_reply?: boolean;
 }
 
 export interface FeishuConfig extends BaseChannelConfig {
@@ -42,6 +43,7 @@ export interface FeishuConfig extends BaseChannelConfig {
 export interface QQConfig extends BaseChannelConfig {
   app_id: string;
   client_secret: string;
+  ack_message?: string;
 }
 
 export interface TelegramConfig extends BaseChannelConfig {

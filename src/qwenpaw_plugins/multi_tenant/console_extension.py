@@ -3,47 +3,37 @@
 
 Strategy
 --------
-The original ``console_extension.py`` only patched the **read** path
-(``WORKING_DIR / "copaw.log"`` → ``TenantAwareLogPath``), but the logging
-framework still wrote **all** logs to the single global file.  This meant
-that any tenant could see every other tenant's log entries.
+The upstream ``console.py`` uses ``LOG_FILE_PATH`` (imported from
+``qwenpaw.utils.logging``) to read the backend log.  This extension patches
+that module-level attribute so that ``LOG_FILE_PATH.resolve()`` returns the
+correct tenant-aware path.
 
-This replacement fixes both sides:
-
-**Write side** — ``TenantAwareFileHandler``
-    Replaces the original ``FileHandler`` (added by ``add_project_file_handler``)
-    with a custom handler that inspects the ``current_tenant_id`` ContextVar on
-    every ``emit()`` call.  If a non-default tenant is active, the log record
-    is written to ``{SECRET_DIR}/tenants/{tenant_id}/{log_filename}`` instead
-    of the global log file.  Otherwise it falls through to the original handler.
-
-**Read side** — ``TenantAwareLogPath`` (unchanged)
-    The existing ``TenantAwareLogPath`` wrapper on ``console.py``'s
-    ``WORKING_DIR`` already routes reads to the per-tenant log file.
+On the write side, the global ``FileHandler`` is replaced with a
+``TenantAwareFileHandler`` that inspects the ``current_tenant_id``
+ContextVar on every ``emit()`` call.
 
 Tenant Directory Layout
 -----------------------
-::
+:::
 
-    {WORKING_DIR}/                          ← ~/.qwenpaw
-    ├── qwenpaw.log                         ← global / default log
+    {WORKING_DIR}/                          <- ~/.qwenpaw
+    ├── qwenpaw.log                         <- global / default log
     └── .qwenpaw.secret/tenants/
         └── {tenant_id}/
-            └── qwenpaw.log                 ← per-tenant log
+            └── qwenpaw.log                 <- per-tenant log
 """
 from __future__ import annotations
 
 import logging
 import logging.handlers
-import os
 import platform
 from pathlib import Path
 from typing import IO
 
 logger = logging.getLogger(__name__)
 
-#: Original WORKING_DIR from qwenpaw.constant (saved on first patch)
-_original_working_dir: Path | None = None
+#: Original LOG_FILE_PATH from console module (saved on first patch)
+_original_log_file_path: Path | None = None
 
 # ---------------------------------------------------------------------------
 # Tenant-aware path wrapper (read side)
@@ -51,37 +41,44 @@ _original_working_dir: Path | None = None
 
 
 class TenantAwareLogPath:
-    """A Path-like object that resolves log files to the correct tenant.
+    """A Path-like object that resolves to the correct tenant's log file.
 
-    Supports the operations used by ``console.py``::
-
-        WORKING_DIR / "copaw.log"    → __truediv__ → returns a real Path
-        (WORKING_DIR / "copaw.log").resolve()  → resolve() on the real Path
+    The upstream ``console.py`` only uses ``LOG_FILE_PATH.resolve()``,
+    so this wrapper only needs to intercept ``resolve()`` and delegate
+    everything else to the original ``Path`` object.
     """
 
     def __init__(self, original: Path) -> None:
         self._original = original
 
-    # ── Path-like operators ─────────────────────────────────────────────────
+    def resolve(self, strict: bool = False) -> Path:
+        """Resolve to tenant-aware log path or original.
 
-    def __truediv__(self, key: str) -> Path:
-        """``WORKING_DIR / "copaw.log"`` → return real tenant-aware Path."""
+        When a non-default tenant is active, returns the tenant-specific
+        log file path; otherwise falls back to the original global path.
+        """
         tenant_id = _resolve_tenant_id()
         if tenant_id and tenant_id != "default":
             from .auth_extension import get_tenant_secret_dir
-            return get_tenant_secret_dir(tenant_id) / key
-        return self._original / key
+            tenant_dir = get_tenant_secret_dir(tenant_id)
+            tenant_dir.mkdir(parents=True, exist_ok=True)
+            return (tenant_dir / self._original.name).resolve(strict)
+        return self._original.resolve(strict)
 
-    def __rtruediv__(self, key: str) -> Path:
-        """``key / WORKING_DIR`` (unlikely but safe)."""
-        raise NotImplementedError("Reverse division not supported")
-
-    # Forward all other attribute access to the original Path
+    # Delegate all other attribute access to the original Path.
+    # This ensures compatibility if upstream adds new usage patterns.
     def __getattr__(self, name: str):
         return getattr(self._original, name)
 
     def __repr__(self) -> str:
         return f"TenantAwareLogPath({self._original!r})"
+
+    # Support Path-like operations (e.g. str() / comparisons)
+    def __str__(self) -> str:
+        return str(self._original)
+
+    def __fspath__(self) -> str:
+        return str(self._original)
 
 
 def _resolve_tenant_id() -> str | None:
@@ -140,7 +137,7 @@ class TenantAwareFileHandler(logging.FileHandler):
             if tenant_id:
                 self._emit_to_tenant(record, tenant_id)
             else:
-                # No tenant context → write to original global log
+                # No tenant context -> write to original global log
                 self._original_handler.emit(record)
         except Exception:
             # Fallback to original handler on any error
@@ -190,25 +187,25 @@ class TenantAwareFileHandler(logging.FileHandler):
 # ---------------------------------------------------------------------------
 
 def patch_console_router() -> None:
-    """Replace the ``WORKING_DIR`` reference in ``console.py`` with a
+    """Replace the ``LOG_FILE_PATH`` reference in ``console.py`` with a
     tenant-aware variant AND replace the global FileHandler with a
     ``TenantAwareFileHandler``.
     """
-    global _original_working_dir
+    global _original_log_file_path
 
-    # --- Read-side patch: TenantAwareLogPath on console.WORKING_DIR ---
+    # --- Read-side patch: TenantAwareLogPath on console.LOG_FILE_PATH ---
     import qwenpaw.app.routers.console as console_module
 
-    if _original_working_dir is None:
-        _original_working_dir = console_module.WORKING_DIR
+    if _original_log_file_path is None:
+        _original_log_file_path = console_module.LOG_FILE_PATH
 
-    console_module.WORKING_DIR = TenantAwareLogPath(_original_working_dir)
+    console_module.LOG_FILE_PATH = TenantAwareLogPath(_original_log_file_path)
 
     # --- Write-side patch: TenantAwareFileHandler ---
     _patch_log_handler()
 
     logger.info(
-        "[multi-tenant/console] Replaced WORKING_DIR in console router "
+        "[multi-tenant/console] Replaced LOG_FILE_PATH in console router "
         "with tenant-aware TenantAwareLogPath and patched file handler"
     )
 
@@ -235,23 +232,23 @@ def _patch_log_handler() -> None:
 
 
 def unpatch_console_router() -> None:
-    """Restore the original ``WORKING_DIR`` in ``console.py`` and
+    """Restore the original ``LOG_FILE_PATH`` in ``console.py`` and
     restore the original FileHandler.
     """
-    global _original_working_dir
+    global _original_log_file_path
 
-    if _original_working_dir is None:
+    if _original_log_file_path is None:
         return
 
     # --- Restore read-side ---
     import qwenpaw.app.routers.console as console_module
-    console_module.WORKING_DIR = _original_working_dir
-    _original_working_dir = None
+    console_module.LOG_FILE_PATH = _original_log_file_path
+    _original_log_file_path = None
 
     # --- Restore write-side ---
     _unpatch_log_handler()
 
-    logger.info("[multi-tenant/console] Restored original WORKING_DIR and FileHandler")
+    logger.info("[multi-tenant/console] Restored original LOG_FILE_PATH and FileHandler")
 
 
 def _unpatch_log_handler() -> None:

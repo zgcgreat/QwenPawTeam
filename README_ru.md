@@ -58,12 +58,13 @@
 
 ## Новости
 
-[2026-04-14] Выпущена версия v1.1.1! Полное описание — в [примечаниях к выпуску v1.1.1](https://qwenpaw.agentscope.io/release-notes).
+[2026-04-17] Выпущена версия **v1.1.2**! Полное описание — в [примечаниях к выпуску v1.1.2](https://qwenpaw.agentscope.io/release-notes).
 
-- [v1.1.1] Добавлено: провайдеры моделей OpenRouter и OpenCode; автодополнение ID моделей при добавлении, обнаружение моделей включено по умолчанию для всех провайдеров; встроенные инструменты `list_agents` и `chat_with_agent` для взаимодействия агентов; полностью переработанный канал Matrix с E2EE, обработкой упоминаний и историей сообщений; обработка цитируемых сообщений Feishu; QR-аутентификация DingTalk; расширенные правила защиты shell-команд; руководство по RESTful API.
-- [v1.1.1] Изменено: DingTalk перенесён на официальный SDK Alibaba Cloud; унифицированное мультимодальное зондирование; сохранение медиа-памяти при переключении моделей; стратегия запуска браузера по умолчанию изменена на управляемый CDP; обновлённый интерфейс управления моделями; конфигурация агентов через вкладки; улучшенный выбор навыков.
-- [v1.1.1] Исправлено: `stop()` QQ-канала больше не блокирует на 8 секунд; исправлена ошибка загрузки локальных моделей в Windows; совместимость с `tool_choice` для vLLM.
-- [v1.1.1] Новые участники: приветствуем @maplefeng-a, @lhpqaq, @jilin6627-spec.
+- **[v1.1.2] Добавлено**: режим Mission (`/mission`) для автономного выполнения длительных задач; протокол ACP для делегирования задач внешним агентам; диагностическая команда `qwenpaw doctor`; создание агентов через CLI `qwenpaw agents create`; планируемая консолидация памяти (Dream); новая страница отладки.
+- **[v1.1.2] Изменено**: инструменты межагентного взаимодействия разделены на синхронный/асинхронный режимы; список провайдеров отсортирован по доступности.
+- **[v1.1.2] Новые участники**: @FrankJingHao, @ployts, @cqhtyi, @leesf, @flystar32.
+
+[2026-04-14] Выпущена версия v1.1.1! Полное описание — в [примечаниях к выпуску v1.1.1](https://qwenpaw.agentscope.io/release-notes).
 
 [2026-04-12] **CoPaw официально переходит на бренд QwenPaw.** Этот ребрендинг — важный шаг в следующую фазу разработки с открытым исходным кодом.
 
@@ -139,18 +140,6 @@ qwenpaw app
 
 ```bash
 curl -fsSL https://qwenpaw.agentscope.io/install.sh | bash
-```
-
-Для установки с поддержкой Ollama:
-
-```bash
-curl -fsSL https://qwenpaw.agentscope.io/install.sh | bash -s -- --extras ollama
-```
-
-Для установки с несколькими дополнениями (например, Ollama + local):
-
-```bash
-curl -fsSL https://qwenpaw.agentscope.io/install.sh | bash -s -- --extras ollama,local
 ```
 
 **Windows (CMD):**
@@ -249,12 +238,13 @@ docker pull agentscope/qwenpaw:latest
 docker run -p 127.0.0.1:8088:8088 \
   -v qwenpaw-data:/app/working \
   -v qwenpaw-secrets:/app/working.secret \
+  -v qwenpaw-backups:/app/working.backups \
   agentscope/qwenpaw:latest
 ```
 
 Для пользователей в Китае также доступен Alibaba Cloud Container Registry (ACR): `agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw` (те же теги).
 
-Затем откройте консоль в браузере: **http://127.0.0.1:8088/**. Конфигурация, память и навыки сохраняются в томе `qwenpaw-data`; настройки моделей и API-ключи сохраняются в томе `qwenpaw-secrets`. Для передачи API-ключей (например, `DASHSCOPE_API_KEY`) добавьте `-e VAR=value` или `--env-file .env` в команду `docker run`.
+Затем откройте консоль в браузере: **http://127.0.0.1:8088/**. Конфигурация, память и навыки сохраняются в томе `qwenpaw-data`; настройки моделей и API-ключи сохраняются в томе `qwenpaw-secrets`; архивы резервных копий сохраняются в томе `qwenpaw-backups`. Для передачи API-ключей (например, `DASHSCOPE_API_KEY`) добавьте `-e VAR=value` или `--env-file .env` в команду `docker run`.
 
 > **Подключение к Ollama или другим сервисам на хост-машине из контейнера**
 >
@@ -266,6 +256,7 @@ docker run -p 127.0.0.1:8088:8088 \
 >   --add-host=host.docker.internal:host-gateway \
 >   -v qwenpaw-data:/app/working \
 >   -v qwenpaw-secrets:/app/working.secret \
+>   -v qwenpaw-backups:/app/working.backups \
 >   agentscope/qwenpaw:latest
 > ```
 > Затем в QwenPaw **Настройки → Модели** измените Base URL на `http://host.docker.internal:<порт>` — например, для Ollama используйте `http://host.docker.internal:11434`, для LM Studio — `http://host.docker.internal:1234/v1`.
@@ -275,6 +266,7 @@ docker run -p 127.0.0.1:8088:8088 \
 > docker run --network=host \
 >   -v qwenpaw-data:/app/working \
 >   -v qwenpaw-secrets:/app/working.secret \
+>   -v qwenpaw-backups:/app/working.backups \
 >   agentscope/qwenpaw:latest
 > ```
 > Не требуется сопоставление портов (`-p`), контейнер напрямую использует сеть хоста. Обратите внимание, что все порты контейнера будут доступны на хосте, что может вызвать конфликты с уже используемыми портами.

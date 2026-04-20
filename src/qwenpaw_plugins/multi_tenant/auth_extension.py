@@ -524,6 +524,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     tenant_dir = get_tenant_working_dir(tenant_id)
                     set_current_workspace_dir(tenant_dir)
 
+                # Propagate X-Agent-Id to ContextVar so that
+                # token_usage and agent_stats can resolve per-agent paths.
+                agent_id = request.headers.get("X-Agent-Id")
+                if agent_id:
+                    from qwenpaw.app.agent_context import set_current_agent_id
+                    set_current_agent_id(agent_id)
+
             return await call_next(request)
 
         # --- Standalone mode: validate HMAC token ---
@@ -550,6 +557,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         tenant_dir = get_tenant_working_dir(tenant_id)
         set_current_workspace_dir(tenant_dir)
+
+        # Propagate X-Agent-Id to ContextVar so that
+        # token_usage and agent_stats can resolve per-agent paths.
+        agent_id = request.headers.get("X-Agent-Id")
+        if agent_id:
+            from qwenpaw.app.agent_context import set_current_agent_id
+            set_current_agent_id(agent_id)
 
         logger.debug("Switched to tenant '%s' dir: %s", tenant_id, tenant_dir)
         return await call_next(request)

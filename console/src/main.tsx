@@ -1,6 +1,11 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./i18n";
+import { installHostExternals } from "./plugins/hostExternals";
+
+// Expose host dependencies (React, antd, etc.) on window
+// so that plugin UI modules can use them without bundling their own copies.
+installHostExternals();
 
 // ── Multi-tenant plugin init (no-op when disabled) ─────────────────
 import { initializeMultiTenant } from "./multi_tenant";

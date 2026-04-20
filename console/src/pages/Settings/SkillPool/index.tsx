@@ -1,4 +1,5 @@
 import { Button, Select, Tooltip } from "@agentscope-ai/design";
+import { Badge } from "antd";
 import {
   AppstoreOutlined,
   CloseOutlined,
@@ -22,14 +23,17 @@ import {
   PoolSkillListItem,
   PoolSkillDrawer,
 } from "./components";
+import { getBuiltinNoticeLines } from "./builtinNotice";
 import { useSkillPool } from "./useSkillPool";
 import { useProgressiveRender } from "../../../hooks/useProgressiveRender";
 import { PageHeader } from "@/components/PageHeader";
+import type { PoolSkillSpec } from "../../../api/types";
 import styles from "./index.module.less";
 
 function SkillPoolPage() {
   const { t } = useTranslation();
   const pool = useSkillPool();
+  const builtinNoticeLines = getBuiltinNoticeLines(pool.builtinNotice, t);
   const {
     visibleItems: visibleSkills,
     hasMore,
@@ -98,14 +102,32 @@ function SkillPoolPage() {
                       {t("skillPool.broadcast")}
                     </Button>
                   </Tooltip>
-                  <Tooltip title={t("skillPool.importBuiltinHint")}>
-                    <Button
-                      type="default"
-                      icon={<SyncOutlined />}
-                      onClick={() => void pool.openImportBuiltin()}
+                  <Tooltip
+                    title={
+                      pool.hasUnseenBuiltinNotice
+                        ? builtinNoticeLines.length > 0
+                          ? builtinNoticeLines.map((line) => (
+                              <div key={line}>{line}</div>
+                            ))
+                          : t("skillPool.importBuiltinAlertHint", {
+                              count: pool.builtinNoticeTotal,
+                            })
+                        : t("skillPool.importBuiltinHint")
+                    }
+                  >
+                    <Badge
+                      dot={pool.hasUnseenBuiltinNotice}
+                      color="rgba(255, 157, 77, 1)"
+                      offset={[-4, 4]}
                     >
-                      {t("skillPool.importBuiltin")}
-                    </Button>
+                      <Button
+                        type="default"
+                        icon={<SyncOutlined />}
+                        onClick={() => void pool.openImportBuiltin()}
+                      >
+                        {t("skillPool.importBuiltin")}
+                      </Button>
+                    </Badge>
                   </Tooltip>
                 </div>
                 <div className={styles.headerActionsRight}>
@@ -167,14 +189,29 @@ function SkillPoolPage() {
                 maxTagCount="responsive"
                 suffixIcon={<SearchOutlined />}
                 notFoundContent={<></>}
-                dropdownRender={() => (
-                  <SkillFilterDropdown
-                    allTags={pool.allTags}
-                    searchTags={pool.searchTags}
-                    setSearchTags={pool.setSearchTags}
-                    styles={styles}
-                  />
-                )}
+                dropdownStyle={
+                  pool.allTags.length === 0
+                    ? {
+                        padding: 0,
+                        border: "none",
+                        boxShadow: "none",
+                        height: 0,
+                        overflow: "hidden",
+                      }
+                    : undefined
+                }
+                dropdownRender={() =>
+                  pool.allTags.length > 0 ? (
+                    <SkillFilterDropdown
+                      allTags={pool.allTags}
+                      searchTags={pool.searchTags}
+                      setSearchTags={pool.setSearchTags}
+                      styles={styles}
+                    />
+                  ) : (
+                    <div />
+                  )
+                }
               />
             </div>
             <div className={styles.toolbarRight}>
@@ -208,7 +245,7 @@ function SkillPoolPage() {
           </div>
         ) : pool.viewMode === "card" ? (
           <div className={styles.skillsGrid}>
-            {visibleSkills.map((skill: any) => (
+            {visibleSkills.map((skill: PoolSkillSpec) => (
               <PoolSkillCard
                 key={skill.name}
                 skill={skill}
@@ -224,7 +261,7 @@ function SkillPoolPage() {
           </div>
         ) : (
           <div className={styles.skillsList}>
-            {visibleSkills.map((skill: any) => (
+            {visibleSkills.map((skill: PoolSkillSpec) => (
               <PoolSkillListItem
                 key={skill.name}
                 skill={skill}
@@ -262,6 +299,9 @@ function SkillPoolPage() {
         open={pool.importBuiltinModalOpen}
         loading={pool.importBuiltinLoading}
         sources={pool.builtinSources}
+        notice={pool.builtinNotice}
+        defaultLanguage={pool.builtinLanguage}
+        defaultSelectedNames={pool.builtinNotice?.actionable_skill_names}
         onCancel={pool.closeImportBuiltin}
         onConfirm={pool.handleImportBuiltins}
       />
@@ -279,6 +319,7 @@ function SkillPoolPage() {
         onContentChange={pool.handleDrawerContentChange}
         onShowMarkdownChange={pool.setShowMarkdown}
         onConfigTextChange={pool.setConfigText}
+        onChangeBuiltinLanguage={pool.handleBuiltinLanguageSwitch}
         validateFrontmatter={pool.validateFrontmatter}
       />
 

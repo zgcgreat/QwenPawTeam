@@ -1,5 +1,9 @@
 import { createGlobalStyle } from "antd-style";
-import { ConfigProvider, bailianTheme } from "@agentscope-ai/design";
+import {
+  ConfigProvider,
+  bailianDarkTheme,
+  bailianTheme,
+} from "@agentscope-ai/design";
 import { App as AntdApp } from "antd";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
@@ -18,6 +22,7 @@ import "dayjs/locale/ru";
 dayjs.extend(relativeTime);
 import MainLayout from "./layouts/MainLayout";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+import { PluginProvider } from "./plugins/PluginContext";
 import LoginPage from "./pages/Login";
 // ── Multi-tenant plugin components (tree-shaken when disabled) ─────
 import { MULTI_TENANT_ENABLED } from "./multi_tenant";
@@ -123,6 +128,7 @@ function AppInner() {
   const basename = getRouterBasename(window.location.pathname);
   const { i18n } = useTranslation();
   const { isDark } = useTheme();
+  const selectedTheme = isDark ? bailianDarkTheme : bailianTheme;
   const lang = i18n.resolvedLanguage || i18n.language || "en";
   const [antdLocale, setAntdLocale] = useState<Locale>(
     antdLocaleMap[lang] ?? enUS,
@@ -164,12 +170,12 @@ function AppInner() {
     <BrowserRouter basename={basename}>
       <GlobalStyle />
       <ConfigProvider
-        {...bailianTheme}
+        {...selectedTheme}
         prefix="qwenpaw"
         prefixCls="qwenpaw"
         locale={antdLocale}
         theme={{
-          ...(bailianTheme as any)?.theme,
+          ...(selectedTheme as any)?.theme,
           algorithm: isDark
             ? antdTheme.darkAlgorithm
             : antdTheme.defaultAlgorithm,
@@ -190,7 +196,9 @@ function AppInner() {
               path="/*"
               element={
                 <ActiveAuthGuard>
-                  <MainLayout />
+                  <PluginProvider>
+                    <MainLayout />
+                  </PluginProvider>
                 </ActiveAuthGuard>
               }
             />

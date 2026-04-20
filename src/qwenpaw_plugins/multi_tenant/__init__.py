@@ -26,6 +26,9 @@ qwenpaw/                    ← upstream code (NEVER modified)
         ├── manager_extension.py  Tenant-isolated MultiAgentManager
         ├── provider_extension.py Tenant-aware ProviderManager overlays
         ├── config_extension.py   Tenant-aware config loading/saving
+        ├── token_usage_extension.py  Per-agent token usage isolation
+        ├── console_extension.py Console log path tenant isolation
+        ├── backup_extension.py  Tenant-isolated backup/restore
         ├── migration_extension.py Tenant workspace initialization
         └── constants.py          Plugin-level constants
 ```
@@ -110,6 +113,11 @@ def activate_multi_tenant(app: FastAPI) -> None:
     patch_console_router()
     logger.info("[multi-tenant] Console router patched")
 
+    # --- Step 2f: Backup router extension (tenant-isolated backups) ---
+    from .backup_extension import patch_backup_router
+    patch_backup_router()
+    logger.info("[multi-tenant] Backup router patched")
+
     # --- Step 3: Auth extension (replaces auth module) ---
     from .auth_extension import patch_auth_module
     patch_auth_module()
@@ -164,6 +172,9 @@ def deactivate_multi_tenant() -> None:
     from .console_extension import unpatch_console_router
     unpatch_console_router()
     logger.info("[multi-tenant] Console router unpatched")
+    from .backup_extension import unpatch_backup_router
+    unpatch_backup_router()
+    logger.info("[multi-tenant] Backup router unpatched")
     _active = False
     logger.info("Multi-tenant plugin deactivated")
 

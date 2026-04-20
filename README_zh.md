@@ -58,12 +58,13 @@
 
 ## 新闻
 
-[2026-04-14] 我们发布了 v1.1.1！完整更新说明见 [v1.1.1 发布说明](https://qwenpaw.agentscope.io/release-notes)。
+[2026-04-17] 我们发布了 **v1.1.2**！完整更新说明见 [v1.1.2 发布说明](https://qwenpaw.agentscope.io/release-notes)。
 
-- [v1.1.1] 新增：OpenRouter 和 OpenCode 模型供应商；添加模型时模型 ID 自动补全，所有供应商默认开启模型发现；内置 `list_agents` 和 `chat_with_agent` Agent 协作工具；Matrix 频道重写，支持端到端加密（E2EE）、提及处理和消息历史；飞书引用消息处理；钉钉扫码认证；扩展 Shell 命令安全守卫规则；RESTful API 教程文档。
-- [v1.1.1] 优化：钉钉频道迁移至阿里云官方 SDK；多模态探测统一化；模型切换时保留媒体记忆；浏览器默认启动策略改为托管 CDP；模型管理重设计；Agent 配置标签页化；技能选择优化。
-- [v1.1.1] 修复：QQ 频道 `stop()` 不再阻塞 8 秒；Windows 本地模型下载失败；vLLM `tool_choice` 兼容。
-- [v1.1.1] 贡献者：感谢新贡献者：@maplefeng-a、@lhpqaq、@jilin6627-spec。
+- **[v1.1.2] 新增**：Mission 模式（`/mission`）支持长程任务执行；支持ACP协议调用外部工具；`qwenpaw doctor` 诊断命令；`qwenpaw agents create` 命令行创建 Agent；记忆定时整理（Dream）；新增调试页面。
+- **[v1.1.2] 优化**：Agent 通信工具拆分为同步/异步模式；供应商列表按可用性排序。
+- **[v1.1.2] 感谢新贡献者**：@FrankJingHao、@ployts、@cqhtyi、@leesf、@flystar32。
+
+[2026-04-14] 我们发布了 v1.1.1！完整更新说明见 [v1.1.1 发布说明](https://qwenpaw.agentscope.io/release-notes)。
 
 [2026-04-12] **CoPaw 正式更名为 QwenPaw**：这是一次品牌名称焕新，也是我们迈向下一阶段开源的重要一步。
 
@@ -135,18 +136,6 @@ qwenpaw app
 
 ```bash
 curl -fsSL https://qwenpaw.agentscope.io/install.sh | bash
-```
-
-如需安装 Ollama 支持：
-
-```bash
-curl -fsSL https://qwenpaw.agentscope.io/install.sh | bash -s -- --extras ollama
-```
-
-如需安装多个扩展（例如 Ollama + local）：
-
-```bash
-curl -fsSL https://qwenpaw.agentscope.io/install.sh | bash -s -- --extras ollama,local
 ```
 
 **Windows (CMD):**
@@ -245,12 +234,13 @@ docker pull agentscope/qwenpaw:latest
 docker run -p 127.0.0.1:8088:8088 \
   -v qwenpaw-data:/app/working \
   -v qwenpaw-secrets:/app/working.secret \
+  -v qwenpaw-backups:/app/working.backups \
   agentscope/qwenpaw:latest
 ```
 
 国内用户也可选用阿里云容器镜像服务 (ACR)：`agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw`（tag 相同）。
 
-然后在浏览器中打开控制台：**http://127.0.0.1:8088/**。配置、记忆与 Skills 保存在 `qwenpaw-data` 卷中；模型配置与 API Key 保存在 `qwenpaw-secrets` 卷中。如需传入 API Key（如 `DASHSCOPE_API_KEY`），在 `docker run` 时添加 `-e VAR=value` 或 `--env-file .env`。
+然后在浏览器中打开控制台：**http://127.0.0.1:8088/**。配置、记忆与 Skills 保存在 `qwenpaw-data` 卷中；模型配置与 API Key 保存在 `qwenpaw-secrets` 卷中；备份归档保存在 `qwenpaw-backups` 卷中。如需传入 API Key（如 `DASHSCOPE_API_KEY`），在 `docker run` 时添加 `-e VAR=value` 或 `--env-file .env`。
 
 > **从容器内连接宿主机上的 Ollama 或其他模型服务**
 >
@@ -262,6 +252,7 @@ docker run -p 127.0.0.1:8088:8088 \
 >   --add-host=host.docker.internal:host-gateway \
 >   -v qwenpaw-data:/app/working \
 >   -v qwenpaw-secrets:/app/working.secret \
+>   -v qwenpaw-backups:/app/working.backups \
 >   agentscope/qwenpaw:latest
 > ```
 > 然后在 QwenPaw **设置 → 模型** 中，将 Base URL 改为 `http://host.docker.internal:<端口>` — 例如 Ollama 填 `http://host.docker.internal:11434`，LM Studio 填 `http://host.docker.internal:1234/v1`。
@@ -271,6 +262,7 @@ docker run -p 127.0.0.1:8088:8088 \
 > docker run --network=host \
 >   -v qwenpaw-data:/app/working \
 >   -v qwenpaw-secrets:/app/working.secret \
+>   -v qwenpaw-backups:/app/working.backups \
 >   agentscope/qwenpaw:latest
 > ```
 > 无需端口映射（`-p`），容器直接共享宿主机网络。注意这会将容器的所有端口暴露在宿主机上，可能与已占用的端口产生冲突。
@@ -353,12 +345,13 @@ docker pull agentscope/qwenpaw:latest
 docker run -p 127.0.0.1:8088:8088 \
   -v qwenpaw-data:/app/working \
   -v qwenpaw-secrets:/app/working.secret \
+  -v qwenpaw-backups:/app/working.backups \
   agentscope/qwenpaw:latest
 ```
 
 国内用户也可选用阿里云容器镜像服务 (ACR)：`agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw`（tag 相同）。
 
-然后在浏览器中打开控制台：**http://127.0.0.1:8088/**。配置、记忆与 Skills 保存在 `qwenpaw-data` 卷中；模型配置与 API Key 保存在 `qwenpaw-secrets` 卷中。如需传入 API Key（如 `DASHSCOPE_API_KEY`），在 `docker run` 时添加 `-e VAR=value` 或 `--env-file .env`。
+然后在浏览器中打开控制台：**http://127.0.0.1:8088/**。配置、记忆与 Skills 保存在 `qwenpaw-data` 卷中；模型配置与 API Key 保存在 `qwenpaw-secrets` 卷中；备份归档保存在 `qwenpaw-backups` 卷中。如需传入 API Key（如 `DASHSCOPE_API_KEY`），在 `docker run` 时添加 `-e VAR=value` 或 `--env-file .env`。
 
 > **从容器内连接宿主机上的 Ollama 或其他模型服务**
 >
@@ -370,6 +363,7 @@ docker run -p 127.0.0.1:8088:8088 \
 >   --add-host=host.docker.internal:host-gateway \
 >   -v qwenpaw-data:/app/working \
 >   -v qwenpaw-secrets:/app/working.secret \
+>   -v qwenpaw-backups:/app/working.backups \
 >   agentscope/qwenpaw:latest
 > ```
 > 然后在 QwenPaw **设置 → 模型** 中，将 Base URL 改为 `http://host.docker.internal:<端口>` — 例如 Ollama 填 `http://host.docker.internal:11434`，LM Studio 填 `http://host.docker.internal:1234/v1`。
@@ -379,6 +373,7 @@ docker run -p 127.0.0.1:8088:8088 \
 > docker run --network=host \
 >   -v qwenpaw-data:/app/working \
 >   -v qwenpaw-secrets:/app/working.secret \
+>   -v qwenpaw-backups:/app/working.backups \
 >   agentscope/qwenpaw:latest
 > ```
 > 无需端口映射（`-p`），容器直接共享宿主机网络。注意这会将容器的所有端口暴露在宿主机上，可能与已占用的端口产生冲突。
