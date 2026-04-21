@@ -536,14 +536,14 @@ app = FastAPI(
 import os as _os
 from qwenpaw_plugins import run_lifespan_hooks  # noqa: F401 — used in lifespan above
 
-if _os.environ.get("QWENPAW_MULTI_TENANT_ENABLED", "true").lower() in (
+if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
     "true",
     "1",
     "yes",
 ):
-    from qwenpaw_plugins.multi_tenant import activate_multi_tenant
+    from qwenpaw_plugins.multi_user import activate_multi_user
 
-    activate_multi_tenant(app)
+    activate_multi_user(app)
 
     # Re-import AuthMiddleware after patch_auth_module() has replaced it.
     from qwenpaw.app import auth as _auth_module_reimport

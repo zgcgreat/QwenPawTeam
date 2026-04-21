@@ -1,6 +1,6 @@
 import { getApiUrl, clearAuthToken } from "./config";
-// Multi-tenant plugin auth headers (gracefully degrades when disabled)
-import { buildAuthHeaders } from "../multi_tenant/authHeaders";
+// Multi-user plugin auth headers (gracefully degrades when disabled)
+import { buildAuthHeaders } from "../multi_user/authHeaders";
 
 function getErrorMessageFromBody(
   text: string,
@@ -62,7 +62,7 @@ function buildHeaders(method?: string, extra?: HeadersInit): Headers {
  * Handle a 401 Unauthorized response.
  *
  * The default implementation clears the auth token and redirects to /login.
- * Plugins (e.g. multi-tenant) may call `setHandle401()` to replace this
+ * Plugins (e.g. multi-user) may call `setHandle401()` to replace this
  * with a custom handler that adds SSO cookie detection or extra session cleanup.
  */
 let _handle401: () => void = () => {

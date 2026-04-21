@@ -24,10 +24,10 @@ import MainLayout from "./layouts/MainLayout";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import { PluginProvider } from "./plugins/PluginContext";
 import LoginPage from "./pages/Login";
-// ── Multi-tenant plugin components (tree-shaken when disabled) ─────
-import { MULTI_TENANT_ENABLED } from "./multi_tenant";
-import MtLoginPage from "./multi_tenant/LoginPage";
-import MtAuthGuard from "./multi_tenant/AuthGuard";
+// ── Multi-user plugin components (tree-shaken when disabled) ─────
+import { MULTI_USER_ENABLED } from "./multi_user";
+import MuLoginPage from "./multi_user/LoginPage";
+import MuAuthGuard from "./multi_user/AuthGuard";
 import { authApi } from "./api/modules/auth";
 import { languageApi } from "./api/modules/language";
 import { getApiUrl, getApiToken, clearAuthToken } from "./api/config";
@@ -58,7 +58,7 @@ const GlobalStyle = createGlobalStyle`
 /**
  * Upstream (original) QwenPaw auth guard.
  * Checks auth status → verifies token → redirects to /login if needed.
- * Only used when MULTI_TENANT_ENABLED is false.
+ * Only used when MULTI_USER_ENABLED is false.
  */
 function UpstreamAuthGuard({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "auth-required" | "ok">(
@@ -118,7 +118,7 @@ function UpstreamAuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 /** Select the appropriate auth guard at the Route level (no Hooks violations). */
-const ActiveAuthGuard = MULTI_TENANT_ENABLED ? MtAuthGuard : UpstreamAuthGuard;
+const ActiveAuthGuard = MULTI_USER_ENABLED ? MuAuthGuard : UpstreamAuthGuard;
 
 function getRouterBasename(pathname: string): string | undefined {
   return /^\/console(?:\/|$)/.test(pathname) ? "/console" : undefined;
@@ -189,7 +189,7 @@ function AppInner() {
             <Route
               path="/login"
               element={
-                MULTI_TENANT_ENABLED ? <MtLoginPage /> : <LoginPage />
+                MULTI_USER_ENABLED ? <MuLoginPage /> : <LoginPage />
               }
             />
             <Route

@@ -40,7 +40,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 def _resolve_workspace_base_dir() -> Path:
     """Return the base directory for new agent workspaces.
 
-    Plugins (e.g. multi-tenant) may monkey-patch this function at
+    Plugins (e.g. multi-user) may monkey-patch this function at
     module level to return a tenant-specific directory instead of
     the global ``WORKING_DIR``.
     """

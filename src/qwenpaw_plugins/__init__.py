@@ -5,8 +5,8 @@ This package contains optional plugin modules that extend QwenPaw's
 functionality without modifying any upstream source files.
 
 Available plugins:
-- ``multi_tenant``: Multi-user / multi-tenant support with isolated
-  workspaces per tenant.
+- ``multi_user``: Multi-user support with isolated
+  workspaces per user.
 
 Lifespan Hooks
 --------------

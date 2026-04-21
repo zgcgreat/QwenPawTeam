@@ -21,9 +21,9 @@ import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyOutlined, CheckOutlined, TagOutlined } from "@ant-design/icons";
-// ── Multi-tenant plugin: user menu in header (tree-shaken when disabled) ─
-import { MULTI_TENANT_ENABLED } from "../multi_tenant";
-import MtHeaderUserMenu from "../multi_tenant/HeaderUserMenu";
+// ── Multi-user plugin: user menu in header (tree-shaken when disabled) ─
+import { MULTI_USER_ENABLED } from "../multi_user";
+import MuHeaderUserMenu from "../multi_user/HeaderUserMenu";
 
 const { Header: AntHeader } = Layout;
 
@@ -186,7 +186,7 @@ export default function Header() {
           )}
         </div>
         <Space size="middle">
-          {MULTI_TENANT_ENABLED && <MtHeaderUserMenu />}
+          {MULTI_USER_ENABLED && <MuHeaderUserMenu />}
           <Tooltip title={t("header.changelog")}>
             <Button
               type="text"

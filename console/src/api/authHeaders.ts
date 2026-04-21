@@ -1,16 +1,16 @@
 /**
  * Authorization + X-Agent-Id for API requests.
  *
- * When the multi-tenant plugin is active (VITE_MULTI_TENANT_ENABLED=true),
+ * When the multi-user plugin is active (VITE_MULTI_USER_ENABLED=true),
  * this delegates to the plugin version which also supports SSO cookies and
  * forwarded headers.  Otherwise falls back to the original upstream logic.
  *
  * This single delegation point ensures every upstream consumer that imports
- * from "../authHeaders" automatically benefits from multi-tenant auth — no
+ * from "../authHeaders" automatically benefits from multi-user auth — no
  * per-file import path changes needed.
  */
-import { MULTI_TENANT_ENABLED } from "../multi_tenant/index";
-import { buildAuthHeaders as mtBuildAuthHeaders } from "../multi_tenant/authHeaders";
+import { MULTI_USER_ENABLED } from "../multi_user/index";
+import { buildAuthHeaders as muBuildAuthHeaders } from "../multi_user/authHeaders";
 import { getApiToken } from "./config";
 
 function _upstreamBuildAuthHeaders(): Record<string, string> {
@@ -35,7 +35,7 @@ function _upstreamBuildAuthHeaders(): Record<string, string> {
 }
 
 export function buildAuthHeaders(): Record<string, string> {
-  return MULTI_TENANT_ENABLED
-    ? mtBuildAuthHeaders()
+  return MULTI_USER_ENABLED
+    ? muBuildAuthHeaders()
     : _upstreamBuildAuthHeaders();
 }

@@ -7,9 +7,9 @@ import { installHostExternals } from "./plugins/hostExternals";
 // so that plugin UI modules can use them without bundling their own copies.
 installHostExternals();
 
-// ── Multi-tenant plugin init (no-op when disabled) ─────────────────
-import { initializeMultiTenant } from "./multi_tenant";
-initializeMultiTenant();
+// ── Multi-user plugin init (no-op when disabled) ─────────────────
+import { initializeMultiUser } from "./multi_user";
+initializeMultiUser();
 
 if (typeof window !== "undefined") {
   const originalError = console.error;

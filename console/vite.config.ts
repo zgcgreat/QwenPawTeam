@@ -13,11 +13,11 @@ export default defineConfig(({ mode }) => {
       VITE_API_BASE_URL: JSON.stringify(apiBaseUrl),
       TOKEN: JSON.stringify(env.TOKEN || ""),
       MOBILE: false,
-      // ── Multi-tenant plugin flag ────────────────────────────────
-      // Set VITE_MULTI_TENANT_ENABLED=true to activate the console
-      // multi-tenant plugin (5-tuple login, SSO cookie auth, etc.).
-      VITE_MULTI_TENANT_ENABLED: JSON.stringify(
-        env.VITE_MULTI_TENANT_ENABLED === "true",
+      // ── Multi-user plugin flag ────────────────────────────────
+      // Set VITE_MULTI_USER_ENABLED=true to activate the console
+      // multi-user plugin (dynamic login fields, SSO cookie auth, etc.).
+      VITE_MULTI_USER_ENABLED: JSON.stringify(
+        env.VITE_MULTI_USER_ENABLED === "true",
       ),
       // Optional: comma-separated SSO cookie names (overrides defaults)
       VITE_SSO_COOKIE_NAMES: JSON.stringify(env.VITE_SSO_COOKIE_NAMES || ""),

@@ -1,0 +1,106 @@
+{
+  "zh": {
+    "login": {
+      "username": "用户名",
+      "orgId": "机构编号",
+      "deptId": "部门编号",
+      "userId": "用户编号",
+      "companyId": "公司编号",
+      "password": "密码",
+      "usernamePlaceholder": "请输入用户名",
+      "orgIdPlaceholder": "请输入机构编号",
+      "deptIdPlaceholder": "请输入部门编号",
+      "userIdPlaceholder": "请输入用户编号",
+      "companyIdPlaceholder": "请输入公司编号",
+      "passwordPlaceholder": "请输入密码",
+      "usernameRequired": "请输入用户名",
+      "passwordRequired": "请输入密码",
+      "logout": "退出登录",
+      "logoutSuccess": "已成功退出"
+    },
+    "header": {
+      "switchUser": "切换用户"
+    },
+    "app": {
+      "initializing": "正在初始化，请稍候…"
+    }
+  },
+  "en": {
+    "login": {
+      "username": "Username",
+      "orgId": "Organization ID",
+      "deptId": "Department ID",
+      "userId": "User ID",
+      "companyId": "Company ID",
+      "password": "Password",
+      "usernamePlaceholder": "Enter username",
+      "orgIdPlaceholder": "Enter organization ID",
+      "deptIdPlaceholder": "Enter department ID",
+      "userIdPlaceholder": "Enter user ID",
+      "companyIdPlaceholder": "Enter company ID",
+      "passwordPlaceholder": "Enter password",
+      "usernameRequired": "Please enter your username",
+      "passwordRequired": "Please enter your password",
+      "logout": "Logout",
+      "logoutSuccess": "Logged out successfully"
+    },
+    "header": {
+      "switchUser": "Switch User"
+    },
+    "app": {
+      "initializing": "Initializing, please wait…"
+    }
+  },
+  "ja": {
+    "login": {
+      "username": "ユーザー名",
+      "orgId": "組織ID",
+      "deptId": "部門ID",
+      "userId": "ユーザーID",
+      "companyId": "会社ID",
+      "password": "パスワード",
+      "usernamePlaceholder": "ユーザー名を入力してください",
+      "orgIdPlaceholder": "組織IDを入力してください",
+      "deptIdPlaceholder": "部門IDを入力してください",
+      "userIdPlaceholder": "ユーザーIDを入力してください",
+      "companyIdPlaceholder": "会社IDを入力してください",
+      "passwordPlaceholder": "パスワードを入力してください",
+      "usernameRequired": "ユーザー名を入力してください",
+      "passwordRequired": "パスワードを入力してください",
+      "logout": "ログアウト",
+      "logoutSuccess": "正常にログアウトしました"
+    },
+    "header": {
+      "switchUser": "ユーザー切り替え"
+    },
+    "app": {
+      "initializing": "初期化中、お待ちください…"
+    }
+  },
+  "ru": {
+    "login": {
+      "username": "Имя пользователя",
+      "orgId": "ID организации",
+      "deptId": "ID отдела",
+      "userId": "ID пользователя",
+      "companyId": "ID компании",
+      "password": "Пароль",
+      "usernamePlaceholder": "Введите имя пользователя",
+      "orgIdPlaceholder": "Введите ID организации",
+      "deptIdPlaceholder": "Введите ID отдела",
+      "userIdPlaceholder": "Введите ID пользователя",
+      "companyIdPlaceholder": "Введите ID компании",
+      "passwordPlaceholder": "Введите пароль",
+      "usernameRequired": "Пожалуйста, введите имя пользователя",
+      "passwordRequired": "Пожалуйста, введите пароль",
+      "logout": "Выйти",
+      "logoutSuccess": "Вы успешно вышли"
+    },
+    "header": {
+      "switchUser": "Сменить пользователя"
+    },
+    "app": {
+      "initializing": "Инициализация, подождите…"
+    }
+  }
+}
