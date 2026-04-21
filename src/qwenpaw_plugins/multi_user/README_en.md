@@ -1,6 +1,12 @@
 # QwenPaw Multi-User Plugin
 
-> Turn a single-user QwenPaw instance into a multi-user platform with **one environment variable** — zero changes to upstream code.
+> A derivative work of [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache License 2.0). Turn a single-user instance into a multi-user platform with **one environment variable**.
+
+---
+
+**License**: [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
+**Base Project**: [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | Apache License 2.0  
+**Copyright**: Copyright 2024 QwenPawTeam Authors
 
 ---
 

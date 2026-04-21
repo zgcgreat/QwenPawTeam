@@ -1,6 +1,12 @@
 # QwenPaw 多用户插件
 
-> 通过**一个环境变量**将单用户 QwenPaw 变为多用户平台，无需修改上游代码。
+> 基于 [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache License 2.0) 的二次开发，通过**一个环境变量**将单用户 QwenPaw 变为多用户平台。
+
+---
+
+**License**: [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
+**原始项目**: [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | Apache License 2.0  
+**Copyright**: Copyright 2024 QwenPawTeam Authors
 
 ---
 

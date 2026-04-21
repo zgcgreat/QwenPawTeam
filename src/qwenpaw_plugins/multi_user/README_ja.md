@@ -1,6 +1,12 @@
 # QwenPaw マルチユーザープラグイン
 
-> **1つの環境変数**で単一ユーザー QwenPaw をマルチユーザープラットフォームに変換。上流コードの変更は不要。
+> [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache License 2.0) の二次開発。**1つの環境変数**で、単一ユーザーの QwenPaw をマルチユーザープラットフォームに変換します。
+
+---
+
+**License**: [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
+**ベースプロジェクト**: [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | Apache License 2.0  
+**Copyright**: Copyright 2024 QwenPawTeam Authors
 
 ---
 
