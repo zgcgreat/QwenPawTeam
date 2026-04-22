@@ -50,7 +50,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     optimizeDeps: {
-      include: ["diff"],
+      include: [],
     },
     build: {
       // Output to QwenPaw's console directory,

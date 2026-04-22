@@ -37,9 +37,39 @@ QWENPAW_AUTH_PASSWORD=changeme
 
 ### 2. サーバーを起動
 
+#### バックエンド起動
+
 ```bash
+# 仮想環境を作成（初回のみ）
+python -m venv venv
+
+# 仮想環境を有効化
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
+
+# 依存関係をインストール（初回のみ）
+pip install -e .
+
+# バックエンドサービスを起動
 python run_server.py
 ```
+
+#### フロントエンド起動
+
+```bash
+# フロントエンドディレクトリに移動
+cd console
+
+# 依存関係をインストール（初回のみ）
+pnpm install
+
+# フロントエンド開発サーバーを起動
+pnpm run dev
+```
+
+バックエンドはデフォルトで `http://localhost:8000` で実行され、フロントエンドは `http://localhost:5173` で実行されます。
 
 ### 3. ブラウザでログイン
 

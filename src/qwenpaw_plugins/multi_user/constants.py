@@ -254,6 +254,8 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/console",
         "/console/",
         "/api/settings/language",
+        # Plugin system (needed before auth completes)
+        "/api/plugins",
     },
 )
 

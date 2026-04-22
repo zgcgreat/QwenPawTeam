@@ -37,9 +37,40 @@ QWENPAW_AUTH_PASSWORD=changeme
 
 ### 2. 启动服务
 
+#### 后端启动
+
 ```bash
+# 创建虚拟环境（首次运行）
+python -m venv venv
+
+# 激活虚拟环境
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
+
+# 安装依赖（首次运行）
+pip install uv;
+uv pip install -e .
+
+# 启动后端服务
 python run_server.py
 ```
+
+#### 前端启动
+
+```bash
+# 进入前端目录
+cd console
+
+# 安装依赖（首次运行）
+pnpm install
+
+# 启动前端开发服务器
+pnpm run dev
+```
+
+后端默认运行在 `http://localhost:8000`，前端默认运行在 `http://localhost:5173`。
 
 ### 3. 打开浏览器登录
 

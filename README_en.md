@@ -37,9 +37,39 @@ QWENPAW_AUTH_PASSWORD=changeme
 
 ### 2. Start the server
 
+#### Backend Startup
+
 ```bash
+# Create virtual environment (first time only)
+python -m venv venv
+
+# Activate virtual environment
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
+
+# Install dependencies (first time only)
+pip install -e .
+
+# Start backend service
 python run_server.py
 ```
+
+#### Frontend Startup
+
+```bash
+# Enter frontend directory
+cd console
+
+# Install dependencies (first time only)
+pnpm install
+
+# Start frontend development server
+pnpm run dev
+```
+
+The backend runs on `http://localhost:8000` by default, and the frontend runs on `http://localhost:5173`.
 
 ### 3. Open your browser
 

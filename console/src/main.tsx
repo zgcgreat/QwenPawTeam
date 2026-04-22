@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./i18n";
 import { installHostExternals } from "./plugins/hostExternals";
+import { registerHostModulesEager } from "./plugins/dynamicModuleRegistry";
 
 // Expose host dependencies (React, antd, etc.) on window
 // so that plugin UI modules can use them without bundling their own copies.
@@ -10,6 +11,10 @@ installHostExternals();
 // ── Multi-user plugin init (no-op when disabled) ─────────────────
 import { initializeMultiUser } from "./multi_user";
 initializeMultiUser();
+
+// Dynamic module registration - no generated files needed!
+// Automatically discovers all modules in src/pages at build time
+registerHostModulesEager();
 
 if (typeof window !== "undefined") {
   const originalError = console.error;
