@@ -29,7 +29,7 @@ from ...config.config import (
 )
 from ...config.utils import load_config, save_config
 from ...agents.memory.agent_md_manager import AgentMdManager
-from ...agents.utils import copy_workspace_md_files
+from ...agents.utils import copy_workspace_md_files, normalize_agent_language
 from ...agents.skills_manager import SkillPoolService, get_workspace_skills_dir
 from ..multi_agent_manager import MultiAgentManager
 from ...constant import WORKING_DIR
@@ -37,16 +37,6 @@ from ...constant import WORKING_DIR
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
-
-
-def _resolve_workspace_base_dir() -> Path:
-    """Return the base directory for new agent workspaces.
-
-    Plugins (e.g. multi-user) may monkey-patch this function at
-    module level to return a tenant-specific directory instead of
-    the global ``WORKING_DIR``.
-    """
-    return WORKING_DIR
 
 
 class AgentSummary(BaseModel):
@@ -84,7 +74,7 @@ class CreateAgentRequest(BaseModel):
     name: str
     description: str = ""
     workspace_dir: str | None = None
-    language: str = "en"
+    language: str | None = None
     skill_names: list[str] | None = None
     active_model: ModelSlotConfig | None = None
 
@@ -328,10 +318,8 @@ async def create_agent(
         new_id = _generate_unique_id(existing_ids)
 
     # Resolve the base directory for new workspaces.
-    _base_dir = _resolve_workspace_base_dir()
-
     workspace_dir = Path(
-        request.workspace_dir or f"{_base_dir}/workspaces/{new_id}",
+        request.workspace_dir or f"{WORKING_DIR}/workspaces/{new_id}",
     ).expanduser()
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -342,12 +330,16 @@ async def create_agent(
         ToolsConfig,
     )
 
+    language = normalize_agent_language(
+        request.language or config.agents.language or "en",
+    )
+
     agent_config = AgentProfileConfig(
         id=new_id,
         name=request.name,
         description=request.description,
         workspace_dir=str(workspace_dir),
-        language=request.language,
+        language=language,
         channels=ChannelConfig(),
         mcp=MCPConfig(),
         heartbeat=HeartbeatConfig(),
@@ -360,6 +352,7 @@ async def create_agent(
         skill_names=(
             request.skill_names if request.skill_names is not None else []
         ),
+        language=language,
     )
 
     agent_ref = AgentProfileRef(
@@ -730,6 +723,7 @@ def _initialize_agent_workspace(
     workspace_dir: Path,
     skill_names: list[str] | None = None,
     md_template_id: str | None = None,
+    language: str | None = None,
 ) -> None:
     """Initialize agent workspace with only explicitly requested skills."""
     from ...config import load_config as load_global_config
@@ -739,7 +733,8 @@ def _initialize_agent_workspace(
     get_workspace_skills_dir(workspace_dir).mkdir(exist_ok=True)
 
     config = load_global_config()
-    language = config.agents.language or "zh"
+    if not language:
+        language = config.agents.language or "zh"
 
     _apply_workspace_md_templates(
         workspace_dir,

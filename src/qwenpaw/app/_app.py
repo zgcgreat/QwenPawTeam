@@ -4,7 +4,6 @@ import inspect
 import asyncio
 import mimetypes
 import os
-import subprocess
 import sys
 import time
 import uuid
@@ -39,6 +38,7 @@ from ..utils.system_info import summarize_python_environment
 from .auth import AuthMiddleware
 from .routers import router as api_router, create_agent_scoped_router
 from .routers.agent_scoped import AgentContextMiddleware
+from .routers.approval import router as approval_router
 from .routers.voice import voice_router
 from ..envs import load_envs_into_environ
 from ..providers.provider_manager import ProviderManager
@@ -276,6 +276,13 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
     # --- Local model manager initialization ---
     local_model_manager = LocalModelManager.get_instance()
 
+    # Start token usage manager background tasks
+    logger.debug("Starting TokenUsageManager background tasks...")
+    from ..token_usage import get_token_usage_manager
+
+    token_usage_manager = get_token_usage_manager()
+    token_usage_manager.start(flush_interval=10)
+
     # Expose to endpoints (must be set before first request arrives)
     app.state.multi_agent_manager = multi_agent_manager
     app.state.provider_manager = provider_manager
@@ -459,11 +466,6 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
 
     _bg_task = asyncio.create_task(_background_startup())
 
-    # Schedule console staleness check to print after uvicorn's
-    # "Running on" message.
-    if _CONSOLE_STATIC_DIR:
-        asyncio.create_task(_warn_stale_console())
-
     try:
         yield
     finally:
@@ -525,6 +527,13 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
                 await multi_agent_mgr.stop_all()
             except Exception as e:
                 logger.error(f"Error stopping MultiAgentManager: {e}")
+
+        # Stop token usage manager (drain queue and final flush)
+        logger.info("Stopping TokenUsageManager...")
+        try:
+            await token_usage_manager.stop()
+        except Exception as e:
+            logger.error(f"Error stopping TokenUsageManager: {e}")
 
         logger.info("Application shutdown complete")
 
@@ -617,56 +626,6 @@ _CONSOLE_INDEX = (
 logger.info(f"STATIC_DIR: {_CONSOLE_STATIC_DIR}")
 
 
-def _check_console_staleness() -> None:
-    """Check if console frontend build matches current repo commit."""
-    if not _CONSOLE_STATIC_DIR:
-        return
-
-    # Only relevant for source installs (repo has .git)
-    repo_dir = Path(__file__).resolve().parent.parent.parent.parent
-    if not (repo_dir / ".git").exists():
-        return
-
-    # Get current repo commit
-    try:
-        current = (
-            subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=str(repo_dir),
-                stderr=subprocess.DEVNULL,
-            )
-            .decode()
-            .strip()
-        )
-    except Exception:
-        return
-
-    build_hash_file = Path(_CONSOLE_STATIC_DIR) / ".build_hash"
-    if not build_hash_file.exists():
-        print(
-            "\n[WARNING] Console frontend has no version info. "
-            "If installed from source, consider rebuilding:\n"
-            "   cd console && npm ci && npm run build\n",
-            file=sys.stderr,
-        )
-        return
-
-    built = build_hash_file.read_text().strip()
-    if built != current:
-        print(
-            f"\n[WARNING] Console frontend may be outdated "
-            f"(built at {built}, repo now at {current}).\n"
-            f"   Run `cd console && npm ci && npm run build` to update.\n",
-            file=sys.stderr,
-        )
-
-
-async def _warn_stale_console() -> None:
-    """Print staleness warning after uvicorn's 'Running on' message."""
-    await asyncio.sleep(0.2)
-    _check_console_staleness()
-
-
 @app.get("/")
 def read_root():
     if _CONSOLE_INDEX and _CONSOLE_INDEX.exists():
@@ -700,6 +659,9 @@ def get_doctor_runtime():
 
 
 app.include_router(api_router, prefix="/api")
+
+# Approval router: /api/approval/approve, /api/approval/deny, etc.
+app.include_router(approval_router, prefix="/api")
 
 # Agent-scoped router: /api/agents/{agentId}/chats, etc.
 agent_scoped_router = create_agent_scoped_router()
@@ -755,4 +717,13 @@ if os.path.isdir(_CONSOLE_STATIC_DIR):
         # Skip API routes (should already be matched due to registration order)
         if full_path.startswith("api/") or full_path == "api":
             raise HTTPException(status_code=404, detail="Not Found")
+
+        # Serve static files from the console build directory (e.g. logo SVGs,
+        # favicons, images placed in public/).  Only serve regular files whose
+        # path does not escape the console directory.
+        if full_path and ".." not in full_path:
+            static_file = _console_path / full_path
+            if static_file.is_file():
+                return FileResponse(static_file)
+
         return _serve_console_index()

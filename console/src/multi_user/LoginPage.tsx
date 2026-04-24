@@ -109,7 +109,7 @@ export default function MuLoginPage() {
           ja: fieldLabelsJa,
           ru: fieldLabelsRu,
         });
-        sessionStorage.removeItem("qwenpaw-agent-storage");
+        localStorage.removeItem("qwenpaw-agent-storage");
         message.success(t("login.success", "Login successful"));
         navigate(redirect, { replace: true });
       } else {

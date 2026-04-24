@@ -100,5 +100,5 @@ export function getStoredUserInfo(): UserInfo | null {
 /** Clear all multi-user session state (for logout/switch-user). */
 export function clearUserSession(): void {
   sessionStorage.removeItem(USER_INFO_SESSION_KEY);
-  sessionStorage.removeItem("qwenpaw-agent-storage");
+  localStorage.removeItem("qwenpaw-agent-storage");
 }

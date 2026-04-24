@@ -135,8 +135,12 @@ export function buildAuthHeaders(): Record<string, string> {
   }
 
   // Agent selection (both modes)
+  // NOTE: agentStore uses localStorage (via zustand/persist), so we must
+  // read from localStorage — NOT sessionStorage — to match the actual
+  // storage location.  Some legacy code clears sessionStorage on login
+  // which would lose the agent selection if we only checked there.
   try {
-    const agentStorage = sessionStorage.getItem("qwenpaw-agent-storage");
+    const agentStorage = localStorage.getItem("qwenpaw-agent-storage");
     if (agentStorage) {
       const parsed = JSON.parse(agentStorage);
       const selectedAgent = parsed?.state?.selectedAgent;

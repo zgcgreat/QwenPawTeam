@@ -2,7 +2,12 @@ import { useState, useMemo, useEffect } from "react";
 import { Button, Form, Tabs } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import { useAgentConfig } from "./useAgentConfig.tsx";
-import { ReactAgentCard, LlmRetryCard, LlmRateLimiterCard } from "./components";
+import {
+  ReactAgentCard,
+  LlmRetryCard,
+  LlmRateLimiterCard,
+  ToolExecutionLevelCard,
+} from "./components";
 import { PageHeader } from "@/components/PageHeader";
 import {
   CONTEXT_MANAGER_BACKEND_MAPPINGS,
@@ -22,6 +27,8 @@ function AgentConfigPage() {
     savingLang,
     timezone,
     savingTimezone,
+    approvalLevel,
+    setApprovalLevel,
     fetchConfig,
     handleSave,
     handleLanguageChange,
@@ -121,6 +128,25 @@ function AgentConfigPage() {
       });
     }
 
+    // Add Tool Execution Level tab
+    baseTabs.push({
+      key: "toolExecutionLevel",
+      label: (
+        <span className={styles.tabLabel}>
+          {t("agentConfig.toolExecutionLevelTitle")}
+        </span>
+      ),
+      children: (
+        <div className={styles.tabContent}>
+          <ToolExecutionLevelCard
+            value={approvalLevel}
+            onChange={setApprovalLevel}
+            disabled={saving}
+          />
+        </div>
+      ),
+    });
+
     return baseTabs;
   }, [
     t,
@@ -134,6 +160,9 @@ function AgentConfigPage() {
     maxInputLength,
     contextBackend,
     memoryBackend,
+    approvalLevel,
+    setApprovalLevel,
+    saving,
   ]);
 
   useEffect(() => {
@@ -177,6 +206,7 @@ function AgentConfigPage() {
             activeKey={activeTab}
             onChange={setActiveTab}
             items={dynamicTabs}
+            destroyInactiveTabPane={false}
           />
         </Form>
       </div>

@@ -43,7 +43,6 @@ All six are patched so no stale local binding can bypass user routing.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 from pathlib import Path
@@ -107,7 +106,8 @@ def _user_agent_get_token_usage_manager():
     """User+agent-aware replacement for ``get_token_usage_manager()``.
 
     - Non-default user  → cached per-(user, agent) ``TokenUsageManager``
-                            whose ``_path`` resolves to the agent directory.
+                            whose ``_buffer._path`` resolves to the
+                            agent-specific file.
     - Default / no user → original global singleton (unchanged behaviour).
     """
     user_id = _resolve_user_id()
@@ -129,12 +129,34 @@ def _user_agent_get_token_usage_manager():
             return _managers[cache_key]
 
         from qwenpaw.token_usage.manager import TokenUsageManager
+        from qwenpaw.token_usage.buffer import TokenUsageBuffer
+
+        path = _get_token_usage_path(user_id, agent_id)
 
         mgr = TokenUsageManager.__new__(TokenUsageManager)
         # Manually initialise fields that __init__ would set, pointing
-        # _path at the agent-specific file.
-        mgr._path = _get_token_usage_path(user_id, agent_id)
-        mgr._file_lock = asyncio.Lock()
+        # the buffer at the agent-specific file.
+        mgr._buffer = TokenUsageBuffer(path)
+        mgr._flush_interval = 10
+
+        # Start the buffer's background tasks (consumer + periodic
+        # flush) so that enqueued events are persisted to disk.
+        # This is safe because get_token_usage_manager() is always
+        # called from within a request handler where the event loop
+        # is running.
+        try:
+            mgr._buffer.start()
+        except RuntimeError:
+            # No running event loop — the buffer will remain idle.
+            # Events will still be readable via get_merged_data()
+            # (which combines disk cache + pending queue), but they
+            # won't be persisted until the buffer is started later.
+            logger.debug(
+                "[multi-user/token_usage] Could not start buffer for "
+                "user '%s' agent '%s' (no event loop); will start lazily",
+                user_id,
+                agent_id,
+            )
 
         _managers[cache_key] = mgr
         logger.debug(
@@ -142,7 +164,7 @@ def _user_agent_get_token_usage_manager():
             "agent '%s' at %s",
             user_id,
             agent_id,
-            mgr._path,
+            path,
         )
 
     return _managers[cache_key]
@@ -255,6 +277,20 @@ def unpatch_token_usage_manager() -> None:
         tool_module.get_token_usage_manager = _original_get_token_usage_manager
     except ImportError:
         pass
+
+    # Stop all per-(user, agent) managers' buffers before clearing
+    for mgr in _managers.values():
+        try:
+            if hasattr(mgr, "_buffer") and mgr._buffer is not None:
+                # Best-effort stop; if no event loop, skip gracefully.
+                try:
+                    import asyncio
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(mgr._buffer.stop())
+                except RuntimeError:
+                    pass
+        except Exception:
+            pass
 
     _managers.clear()
     _original_get_token_usage_manager = None

@@ -872,6 +872,7 @@
     "modelNamePlaceholder": "例: GPT-4o, Gemini 2.0 Flash",
     "modelAdded": "モデル \"{{name}}\" を追加しました",
     "modelAddFailed": "モデルの追加に失敗しました",
+    "modelAlreadyExists": "モデル ID \"{{id}}\" は既に存在します",
     "autoDiscoverModelsSuccess": "自動検出が完了しました。{{count}} 件のモデルを追加しました",
     "autoDiscoverModelsNoNew": "自動検出が完了しました。新しいモデルは追加されませんでした",
     "autoDiscoverModelsFailed": "モデルの自動検出に失敗しました",
@@ -1076,6 +1077,13 @@
     "maxItersMin": "最大反復回数は1以上である必要があります",
     "autoContinueOnTextOnly": "テキストのみのステップで自動継続",
     "autoContinueOnTextOnlyTooltip": "推論ステップがツール呼び出しなしのテキストのみで終わった場合、ヒントを挿入し同じツール方針でもう1回推論します。多段階タスクの途中停止を減らします。オフにすると従来どおりです。有効時はトークン消費が増える場合があります。",
+    "shellCommandTimeout": "Shellコマンドタイムアウト（秒）",
+    "shellCommandTimeoutTooltip": "execute_shell_commandツールのデフォルトタイムアウト（秒）。LLMはtimeoutパラメータで呼び出しごとにこの値を上書きできます。コンパイルやデータ処理などの長時間タスクに便利です。",
+    "shellCommandTimeoutPlaceholder": "タイムアウトを入力",
+    "shellCommandTimeoutRequired": "Shellコマンドタイムアウトは必須です",
+    "shellCommandTimeoutMin": "Shellコマンドタイムアウトは1秒以上である必要があります",
+    "planMode": "プランモード",
+    "planModeTooltip": "/plan <説明> で構造化タスクプランニングを使用できます。有効にするとプラン関連ツールが登録され、プランパネルが表示されます。",
     "maxInputLength": "最大入力長",
     "maxInputLengthTooltip": "モデルのコンテキストウィンドウの最大入力長（トークン数）",
     "maxInputLengthPlaceholder": "最大入力長を入力",
@@ -1209,7 +1217,22 @@
     "rebuildMemoryIndexOnStartTooltip": "エージェント起動時に記憶検索インデックスをクリアして再構築します。無効にすると再インデックス化をスキップし、新しいファイルの変更のみを監視します（起動が速くなりますが、インデックスが同期しなくなる可能性があります）",
     "toolResultCompactRecentGtOld": "最新メッセージの閾値は古いメッセージの閾値以上である必要があります",
     "lightContextTitle": "コンテキスト管理",
-    "remeLightMemoryTitle": "長期記憶"
+    "remeLightMemoryTitle": "長期記憶",
+    "toolExecutionLevelTitle": "ツール実行セキュリティ",
+    "toolExecutionLevel": {
+      "title": "ツール実行セキュリティ",
+      "alertMessage": "ツール呼び出しの承認ポリシーを設定し、エージェントがツールを実行する際のセキュリティレベルを制御します",
+      "strict": "厳格モード",
+      "strictDesc": "すべてのツール呼び出しに承認が必要、最高セキュリティレベル",
+      "smart": "スマートモード",
+      "smartDesc": "低リスクツールは自動承認、中〜高リスクツールは承認が必要",
+      "auto": "自動モード",
+      "autoDesc": "承認が必要と明示的にマークされたツールのみ承認を要求（デフォルト）",
+      "off": "オフモード",
+      "offDesc": "すべてのツール承認を無効化、すべてのツールが自動実行"
+    },
+    "saveLevelSuccess": "ツール実行セキュリティレベルを保存しました",
+    "saveLevelFailed": "ツール実行セキュリティレベルの保存に失敗しました"
   },
   "tools": {
     "title": "ビルトインツール",
@@ -1293,6 +1316,9 @@
       },
       "skills": {
         "description": "チャットで利用可能なスキルを一覧し、明示的なスキルコマンドを表示します"
+      },
+      "plan": {
+        "description": "構造化された計画を作成し、タスクをサブタスクに分解します"
       }
     },
     "attachments": {
@@ -1314,6 +1340,13 @@
       "userMessage": "ユーザー",
       "assistantMessage": "アシスタント",
       "titleMatch": "タイトル"
+    },
+    "contextMenu": {
+      "open": "開く",
+      "rename": "名前を変更",
+      "pin": "ピン留め",
+      "unpin": "ピン留め解除",
+      "delete": "削除"
     }
   },
   "security": {
@@ -1389,6 +1422,19 @@
         "TOOL_CMD_SERVICE_RESTART": "システムサービスを中断させる可能性のあるサービス管理コマンドを検出",
         "TOOL_CMD_PROCESS_KILL": "重要なプロセスを終了させる可能性のあるプロセス終了コマンドを検出",
         "TOOL_CMD_PRIVILEGE_ESCALATION": "sudo、su、doas、pkexec、または runas を使用した権限昇格の試みを検出"
+      },
+      "categories": {
+        "command_injection": "コマンドインジェクション",
+        "code_execution": "コード実行",
+        "data_exfiltration": "データ漏洩",
+        "path_traversal": "パストラバーサル",
+        "sensitive_file_access": "機密ファイルアクセス",
+        "network_abuse": "ネットワーク不正利用",
+        "credential_exposure": "認証情報漏洩",
+        "resource_abuse": "リソース不正利用",
+        "privilege_escalation": "権限昇格",
+        "prompt_injection": "プロンプトインジェクション",
+        "other": "その他"
       }
     },
     "fileGuard": {
@@ -1406,6 +1452,23 @@
       "saveSuccess": "ファイルガード設定を保存しました",
       "saveFailed": "ファイルガード設定の保存に失敗しました",
       "loadFailed": "ファイルガード設定の読み込みに失敗しました"
+    },
+    "allowNoAuthHosts": {
+      "title": "認証不要ホスト",
+      "warningTitle": "セキュリティ警告",
+      "warningDescription": "このリストのIPアドレスは認証なしでAPIエンドポイントにアクセスできます。デフォルトでは、ローカルホスト（127.0.0.1と::1）がCLIアクセスのために許可されています。信頼できるIPアドレスのみを追加してください。警告：信頼できないIPを追加すると、深刻なセキュリティリスクが生じます。",
+      "ipAddress": "IPアドレス",
+      "actions": "操作",
+      "add": "追加",
+      "inputPlaceholder": "IPアドレスを入力（例：192.168.1.100 または ::1）",
+      "empty": "IPアドレスが設定されていません",
+      "default": "デフォルト",
+      "removeConfirm": "このIPアドレスをホワイトリストから削除しますか？",
+      "duplicate": "このIPアドレスは既にリストに存在します",
+      "invalidIP": "無効なIPアドレス形式",
+      "saveSuccess": "認証不要ホスト設定を保存しました",
+      "saveFailed": "認証不要ホスト設定の保存に失敗しました",
+      "loadFailed": "認証不要ホスト設定の読み込みに失敗しました"
     },
     "skillScanner": {
       "title": "スキルスキャナー",
@@ -1558,6 +1621,8 @@
     "stdioBufferLimitHelp": "ACP サブプロセスの stdio 1 行読み取りバッファの最大バイト数です。",
     "stdioBufferLimitRequired": "stdio バッファ上限を入力してください",
     "stdioBufferLimitMin": "stdio バッファ上限は 1 バイト以上である必要があります",
+    "docs": "設定ドキュメント",
+    "docsHelp": "ACP 統合ドキュメントを開き、「How to configure external runners」セクションへ移動します",
     "notSet": "未設定",
     "configSaved": "ACP 設定を保存しました",
     "configFailed": "ACP 設定の保存に失敗しました"
@@ -1672,5 +1737,34 @@
     "progressSaving": "バックアップファイルを保存中...",
     "progressDone": "バックアップ完了",
     "localModelsNotice": "バックアップファイルにはローカルモデルファイルは含まれません。デバイス間の移行の場合は、対象デバイスで必要なローカルモデルを再ダウンロードしてください。"
+  },
+  "approval": {
+    "title": "セキュリティ承認が必要です",
+    "tool": "ツール",
+    "severity": "重要度",
+    "findings": "検出件数",
+    "parameters": "パラメータ",
+    "approve": "承認",
+    "deny": "拒否",
+    "source": "ソース",
+    "subSession": "サブエージェント",
+    "approved": "ツール呼び出しが承認されました",
+    "denied": "ツール呼び出しが拒否されました",
+    "approveFailed": "承認に失敗しました",
+    "cancelTask": "タスクをキャンセル",
+    "denyFailed": "拒否に失敗しました"
+  },
+  "plan": {
+    "title": "プラン",
+    "noPlan": "アクティブなプランがありません",
+    "noPlanHint": "/plan <説明> でプランを作成",
+    "progress": "進捗",
+    "outcome": "結果",
+    "state": {
+      "todo": "未着手",
+      "in_progress": "進行中",
+      "done": "完了",
+      "abandoned": "中止"
+    }
   }
 }

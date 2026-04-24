@@ -87,10 +87,10 @@ COPY pyproject.toml setup.py README.md ./
 COPY src ./src
 # Inject console dist from build stage (repo does not commit dist).
 COPY --from=console-builder /app/console/dist/ ./src/qwenpaw/console/
-RUN pip install --no-cache-dir .
+# Speed up Python package installation with uv.
+COPY --from=agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/uv:latest /uv /bin/uv
+RUN uv pip install --no-cache-dir .
 
-# Init working dir with default config.json and HEARTBEAT.md (build time).
-RUN qwenpaw init --defaults --accept-security
 
 # QwenPaw app port (default 8088). Override at runtime with -e QWENPAW_PORT=3000.
 ENV QWENPAW_PORT=8088

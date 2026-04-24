@@ -163,6 +163,19 @@ def patch_config_utils() -> None:
         Must be called **after** ``qwenpaw.config.utils`` has been imported
         at least once (so the module object exists), but before any request
         handler reads config.
+
+    Patching levels
+    ---------------
+    Many modules hold local bindings to ``load_config`` / ``save_config``
+    created via ``from qwenpaw.config import load_config`` at import time.
+    Simply patching ``qwenpaw.config.utils`` does **not** update those
+    bindings.  We therefore patch at three levels:
+
+    1. ``qwenpaw.config.utils`` — the canonical implementation
+    2. ``qwenpaw.config`` — the package-level re-export
+    3. Key modules that hold local bindings — so no stale reference
+       can bypass user routing (same approach as
+       ``token_usage_extension.py``).
     """
     global _original_load_config, _original_save_config, _original_get_config_path
 
@@ -178,13 +191,135 @@ def patch_config_utils() -> None:
             None,
         )
 
-    # Replace with user-aware versions
+    # Level 1: canonical utils module
     utils_module.load_config = load_config
     utils_module.save_config = save_config
     if hasattr(utils_module, "get_config_path"):
         utils_module.get_config_path = get_config_path
 
-    logger.info("[multi-user/config] Patched load_config, save_config, get_config_path")
+    # Level 2: package-level re-export (qwenpaw.config.__init__)
+    # ``from .utils import load_config`` creates a local binding in
+    # ``qwenpaw.config``'s namespace that is NOT updated by patching
+    # ``utils_module`` above.  We must update it explicitly so that
+    # any ``from qwenpaw.config import load_config`` done *after*
+    # this patch (e.g. function-level imports) picks up the
+    # user-aware version.
+    try:
+        import qwenpaw.config as config_pkg
+        config_pkg.load_config = load_config
+        config_pkg.save_config = save_config
+        if hasattr(config_pkg, "get_config_path"):
+            config_pkg.get_config_path = get_config_path
+    except ImportError:
+        pass
+
+    # Level 3: modules that hold local bindings via
+    # ``from ...config import load_config`` at module level.
+    # These are the modules involved in request handling where
+    # user-aware config resolution is critical.
+    _patch_local_bindings()
+
+    logger.info(
+        "[multi-user/config] Patched load_config, save_config, get_config_path "
+        "(utils, config package, and local bindings)"
+    )
+
+
+#: Modules that import ``load_config`` / ``save_config`` from
+#: ``qwenpaw.config`` at module level (creating local bindings that
+#: bypass the module-level patch).  Only request-handling modules
+#: need to be listed here — CLI commands and startup-only code can
+#: safely use the root config.
+_LOCAL_BINDING_MODULES: list[str] = [
+    "qwenpaw.app._app",
+    "qwenpaw.app.multi_agent_manager",
+    "qwenpaw.app.routers.workspace",
+    "qwenpaw.app.routers.tools",
+    "qwenpaw.app.routers.config",
+    "qwenpaw.app.routers.agents",
+    "qwenpaw.app.routers.settings",
+    "qwenpaw.app.routers.providers",
+    "qwenpaw.app.routers.mcp",
+    "qwenpaw.app.routers.backup",
+    "qwenpaw.app.routers.plan",
+    "qwenpaw.app.agent_context",
+    "qwenpaw.app.runner.utils",
+    "qwenpaw.app.runner.daemon_commands",
+    "qwenpaw.app.auth",
+    "qwenpaw.app.workspace.workspace",
+    "qwenpaw.agents.prompt",
+    "qwenpaw.agents.utils.message_processing",
+    "qwenpaw.agents.memory.reme_light_memory_manager",
+    "qwenpaw.agents.utils.audio_transcription",
+    "qwenpaw.agents.tools.get_current_time",
+    "qwenpaw.security.tool_guard.engine",
+    "qwenpaw.security.tool_guard.utils",
+    "qwenpaw.security.tool_guard.guardians.shell_evasion_guardian",
+    "qwenpaw.security.tool_guard.guardians.rule_guardian",
+    "qwenpaw.security.tool_guard.guardians.file_guardian",
+    "qwenpaw.security.skill_scanner",
+]
+
+
+def _patch_local_bindings() -> None:
+    """Patch local ``load_config`` / ``save_config`` bindings in key modules.
+
+    Modules that do ``from qwenpaw.config import load_config`` at module
+    level create a local name binding.  Replacing the function in the
+    source module (``qwenpaw.config.utils``) does NOT update these local
+    bindings.  We must therefore patch each module individually.
+    """
+    import importlib
+
+    for mod_name in _LOCAL_BINDING_MODULES:
+        try:
+            mod = importlib.import_module(mod_name)
+        except ImportError:
+            continue
+
+        patched = []
+        if hasattr(mod, "load_config") and mod.load_config is not load_config:
+            # Only patch if the binding still points to the original
+            # (avoid overwriting a function-level import inside a def)
+            if mod.load_config is _original_load_config or (
+                # Fallback: check by qualified name for cases where the
+                # original reference is the same function object.
+                hasattr(mod.load_config, "__module__")
+                and mod.load_config.__module__ == "qwenpaw.config.utils"
+                and mod.load_config.__qualname__ == "load_config"
+            ):
+                mod.load_config = load_config
+                patched.append("load_config")
+
+        if hasattr(mod, "save_config") and mod.save_config is not save_config:
+            if mod.save_config is _original_save_config or (
+                hasattr(mod.save_config, "__module__")
+                and mod.save_config.__module__ == "qwenpaw.config.utils"
+                and mod.save_config.__qualname__ == "save_config"
+            ):
+                mod.save_config = save_config
+                patched.append("save_config")
+
+        if hasattr(mod, "get_config_path") and mod.get_config_path is not get_config_path:
+            if (
+                _original_get_config_path is not None
+                and (
+                    mod.get_config_path is _original_get_config_path
+                    or (
+                        hasattr(mod.get_config_path, "__module__")
+                        and mod.get_config_path.__module__ == "qwenpaw.config.utils"
+                    )
+                )
+            ):
+                mod.get_config_path = get_config_path
+                patched.append("get_config_path")
+
+        if patched:
+            logger.debug(
+                "[multi-user/config] Patched local bindings in %s: %s",
+                mod_name,
+                ", ".join(patched),
+            )
 
 
 def unpatch_config_utils() -> None:
@@ -194,8 +329,11 @@ def unpatch_config_utils() -> None:
     if _original_load_config is None:
         return
 
+    import importlib
+
     import qwenpaw.config.utils as utils_module
 
+    # Level 1: utils module
     utils_module.load_config = _original_load_config
     utils_module.save_config = _original_save_config
     if (
@@ -203,6 +341,29 @@ def unpatch_config_utils() -> None:
         and hasattr(utils_module, "get_config_path")
     ):
         utils_module.get_config_path = _original_get_config_path
+
+    # Level 2: config package
+    try:
+        import qwenpaw.config as config_pkg
+        config_pkg.load_config = _original_load_config
+        config_pkg.save_config = _original_save_config
+        if hasattr(config_pkg, "get_config_path") and _original_get_config_path is not None:
+            config_pkg.get_config_path = _original_get_config_path
+    except ImportError:
+        pass
+
+    # Level 3: local bindings
+    for mod_name in _LOCAL_BINDING_MODULES:
+        try:
+            mod = importlib.import_module(mod_name)
+        except ImportError:
+            continue
+        if hasattr(mod, "load_config"):
+            mod.load_config = _original_load_config
+        if hasattr(mod, "save_config"):
+            mod.save_config = _original_save_config
+        if hasattr(mod, "get_config_path") and _original_get_config_path is not None:
+            mod.get_config_path = _original_get_config_path
 
     logger.info("[multi-user/config] Restored original config utils")
 
