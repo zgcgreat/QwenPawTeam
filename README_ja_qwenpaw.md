@@ -58,6 +58,13 @@
 
 ## ニュース
 
+- [2026-04-29] **v1.1.5** をリリースしました！詳細は [v1.1.5 リリースノート](https://qwenpaw.agentscope.io/release-notes) をご覧ください。
+
+  - **[v1.1.5] 新機能**：メモリ検索の最適化；コンテキスト圧縮のフォールバック機構；ACP エージェントのリネーム・削除；QQ 音声・ASR 対応。
+  - **[v1.1.5] パフォーマンス**：設定ファイルとスキルマニフェストのキャッシュ；モデル API リクエストの重複排除；コンソールチャットの仮想化レンダリング。
+  - **[v1.1.5] 修正**：チャネル承認コマンド；タイムゾーンの正規化；MCP 実行タイムアウトの処理。
+  - **[v1.1.5] 新規コントリビューター**：@LinQi0777、@albert-zen、@ideal、@CA-mambo、@bxy3045134656 の皆さん、ありがとうございます。
+
 - [2026-04-24] **v1.1.4** をリリースしました！詳細は [v1.1.4 リリースノート](https://qwenpaw.agentscope.io/release-notes) をご覧ください。
 
   - **[v1.1.4] 新機能**：メモリ＆コンテキストアーキテクチャの再構築；プランモード；Shell 回避チェックの個別設定；認証バイパスホストのホワイトリスト；SIP 音声チャネル；セッション右クリックメニュー；ブラウザ起動パラメータと Shell コマンドタイムアウト設定；DeepSeek V4 モデル。
@@ -70,7 +77,7 @@
 
 - [2026-04-14] **v1.1.1** をリリースしました！詳細は [v1.1.1 リリースノート](https://qwenpaw.agentscope.io/release-notes) をご覧ください。
 
-[2026-04-12] **CoPaw は正式に QwenPaw へリブランディングしました**。オープンソース開発の次のフェーズへ進むうえでの、重要な一歩です。
+- [2026-04-12] **CoPaw は正式に QwenPaw へリブランディングしました**。オープンソース開発の次のフェーズへ進むうえでの、重要な一歩です。
 
 新しい名前は、私たちが築いているオープンなエコシステムと、これからも追求していく大きな方向性を、より的確に表しています。
 
@@ -384,6 +391,7 @@ qwenpaw app    # サービスを起動
 | [モデル](https://qwenpaw.agentscope.io/docs/models)                         | クラウド・ローカル・カスタムプロバイダーの設定       |
 | [チャネル](https://qwenpaw.agentscope.io/docs/channels)                      | DingTalk、Feishu、QQ、Discord、iMessageなど         |
 | [スキル](https://qwenpaw.agentscope.io/docs/skills)                          | 機能の拡張とカスタマイズ                             |
+| [プラグイン](https://qwenpaw.agentscope.io/docs/plugins)                     | プラグインシステム                                   |
 | [MCP](https://qwenpaw.agentscope.io/docs/mcp)                                | MCPクライアントの管理                               |
 | [メモリ](https://qwenpaw.agentscope.io/docs/memory)                          | 長期記憶                              |
 | [記憶進化＆プロアクティブ](https://qwenpaw.agentscope.io/docs/memory-evolving-and-proactive) | エージェントの記憶進化とプロアクティブインタラクション |
