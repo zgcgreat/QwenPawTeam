@@ -99,7 +99,7 @@ export default function MuLoginPage() {
       const redirect =
         raw.startsWith("/") && !raw.startsWith("//") ? raw : "/chat";
 
-      const res = await muAuthApi.login(values);
+      const res = await muAuthApi.login(values as import("./types").LoginRequest);
       if (res.token) {
         _setAuthToken(res.token);
         // Store user info with ALL language field labels for HeaderUserMenu language switching

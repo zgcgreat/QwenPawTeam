@@ -92,7 +92,7 @@ export async function request<T = unknown>(
 
     if (!response.ok) {
       if (response.status === 401) {
-        handle401();
+        _handle401();
         throw new Error("Not authenticated");
       }
 

@@ -225,6 +225,7 @@
       "x": "X",
       "github": "GitHub",
       "discord": "Discord",
+      "wechat": "WeChat Official Account",
       "youtube": "YouTube"
     },
     "copyright": "© 2026 Qwenpaw PRIVATE LIMITED, All rights reserved.",
@@ -264,6 +265,7 @@
     "memoryEvolvingAndProactive": "Memory-Evolving & Proactive",
     "context": "Context",
     "commands": "Magic commands",
+    "plan": "Plan mode",
     "heartbeat": "Heartbeat",
     "config": "Config & working dir",
     "security": "Security",

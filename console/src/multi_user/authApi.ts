@@ -40,7 +40,11 @@ export const muAuthApi = {
     if (!res.ok) return null;
     const data = await res.json();
     // Transform backend flat response to frontend UserInfo format
-    return _transformResponse(data);
+    const base = _transformResponse(data);
+    return {
+      ...base,
+      initialized: typeof data.initialized === "boolean" ? data.initialized : true,
+    };
   },
 
   /**

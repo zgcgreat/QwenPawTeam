@@ -101,22 +101,6 @@ class CreateAgentRequest(BaseModel):
         return value
 
 
-class MdFileInfo(BaseModel):
-    """Markdown file metadata."""
-
-    filename: str
-    path: str
-    size: int
-    created_time: str
-    modified_time: str
-
-
-class MdFileContent(BaseModel):
-    """Markdown file content."""
-
-    content: str
-
-
 def _get_multi_agent_manager(request: Request) -> MultiAgentManager:
     """Get MultiAgentManager from app state."""
     if not hasattr(request.app.state, "multi_agent_manager"):

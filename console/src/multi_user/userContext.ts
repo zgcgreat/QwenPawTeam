@@ -5,7 +5,7 @@
  * Now supports dynamic user fields via `UserFieldMap`.
  */
 
-import type { UserInfo, UserFieldMap } from "./types";
+import type { UserInfo, UserFieldMap, LoginResponse, InitWorkspaceResponse } from "./types";
 import { USER_INFO_SESSION_KEY } from "./index";
 
 /**
@@ -21,12 +21,7 @@ import { USER_INFO_SESSION_KEY } from "./index";
  *                      If omitted, existing stored labels are preserved (useful on page refresh).
  */
 export function storeVerifiedUserInfo(
-  data: {
-    user_id?: string;
-    fields?: UserFieldMap;
-    /** Legacy support: individual field keys from backend response */
-    [key: string]: unknown;
-  },
+  data: UserInfo | LoginResponse | InitWorkspaceResponse,
   fieldLabels?: UserInfo["fieldLabels"],
 ): void {
   let fields: UserFieldMap = {};
