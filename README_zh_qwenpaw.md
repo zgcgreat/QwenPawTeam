@@ -7,7 +7,7 @@
 [![文档](https://img.shields.io/badge/文档-在线-green.svg?logo=readthedocs&label=Docs)](https://qwenpaw.agentscope.io/)
 [![Python 版本](https://img.shields.io/badge/python-3.10%20~%20%3C3.14-blue.svg?logo=python&label=Python)](https://www.python.org/downloads/)
 [![最后提交](https://img.shields.io/github/last-commit/agentscope-ai/QwenPaw)](https://github.com/agentscope-ai/QwenPaw)
-[![许可证](https://img.shields.io/badge/license-Apache%202.0-red.svg?logo=apache&label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
+[![许可证](https://img.shields.io/badge/license-MIT-green.svg?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
 [![代码风格](https://img.shields.io/badge/code%20style-black-black.svg?logo=python&label=%E4%BB%A3%E7%A0%81%E9%A3%8E%E6%A0%BC)](https://github.com/psf/black)
 [![GitHub Star](https://img.shields.io/github/stars/agentscope-ai/QwenPaw?style=flat&logo=github&color=yellow&label=Star)](https://github.com/agentscope-ai/QwenPaw/stargazers)
 [![GitHub Fork](https://img.shields.io/github/forks/agentscope-ai/QwenPaw?style=flat&logo=github&color=purple&label=Fork)](https://github.com/agentscope-ai/QwenPaw/network)
@@ -593,7 +593,7 @@ QwenPaw 在执行 `qwenpaw init` 时会收集**匿名**使用数据，帮助我�
 
 ## 许可证
 
-QwenPaw 采用 [Apache License 2.0](LICENSE) 开源协议。
+QwenPaw 采用 [MIT License](LICENSE) 开源协议。
 
 ---
 

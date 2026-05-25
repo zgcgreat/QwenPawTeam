@@ -7,7 +7,7 @@
 [![Documentation](https://img.shields.io/badge/Docs-Website-green.svg?logo=readthedocs&label=Docs)](https://qwenpaw.agentscope.io/)
 [![Python Version](https://img.shields.io/badge/python-3.10%20~%20%3C3.14-blue.svg?logo=python&label=Python)](https://www.python.org/downloads/)
 [![Last Commit](https://img.shields.io/github/last-commit/agentscope-ai/QwenPaw)](https://github.com/agentscope-ai/QwenPaw)
-[![License](https://img.shields.io/badge/license-Apache%202.0-red.svg?logo=apache&label=License)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg?label=License)](LICENSE)
 [![Code Style](https://img.shields.io/badge/code%20style-black-black.svg?logo=python&label=CodeStyle)](https://github.com/psf/black)
 [![GitHub Stars](https://img.shields.io/github/stars/agentscope-ai/QwenPaw?style=flat&logo=github&color=yellow&label=Stars)](https://github.com/agentscope-ai/QwenPaw/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/agentscope-ai/QwenPaw?style=flat&logo=github&color=purple&label=Forks)](https://github.com/agentscope-ai/QwenPaw/network)
@@ -542,7 +542,7 @@ QwenPaw собирает **анонимные** данные об использ
 
 ## Лицензия
 
-QwenPaw выпускается под лицензией [Apache License 2.0](LICENSE).
+QwenPaw выпускается под лицензией [MIT License](LICENSE).
 
 ---
 

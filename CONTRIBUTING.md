@@ -4,7 +4,7 @@
 
 Thank you for your interest in contributing to QwenPaw! QwenPaw is an open-source **personal AI assistant** that runs in your own environment—on your machine or in the cloud. It connects to DingTalk, Feishu, QQ, Discord, iMessage, and other chat apps, supports scheduled tasks and heartbeat, and extends its capabilities through **Skills**. We warmly welcome contributions that help make QwenPaw more useful for everyone: whether you add a new channel, a new model provider, a Skill, improve docs, or fix bugs.
 
-**Quick links:** [GitHub](https://github.com/agentscope-ai/QwenPaw) · [Docs](https://qwenpaw.agentscope.io/) · [License: Apache 2.0](LICENSE)
+**Quick links:** [GitHub](https://github.com/agentscope-ai/QwenPaw) · [Docs](https://qwenpaw.agentscope.io/) · [License: MIT](LICENSE)
 
 ---
 

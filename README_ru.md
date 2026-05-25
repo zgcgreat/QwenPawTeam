@@ -1,10 +1,10 @@
 # QwenPaw Плагин мультиользователя
 
-> Производная работа от [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache License 2.0). Превратите однопользовательский QwenPaw в мультиользовательскую платформу с **одной переменной окружения**.
+> Производная работа от [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (MIT License). Превратите однопользовательский QwenPaw в мультиользовательскую платформу с **одной переменной окружения**.
 
 ---
 
-**License**: [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
+**License**: [MIT License](https://opensource.org/licenses/MIT)
 **Базовый проект**: [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | Apache License 2.0  
 **Copyright**: Copyright 2024 QwenPawTeam Authors
 

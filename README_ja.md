@@ -1,10 +1,10 @@
 # QwenPaw マルチユーザープラグイン
 
-> [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache License 2.0) の二次開発。**1つの環境変数**で、単一ユーザーの QwenPaw をマルチユーザープラットフォームに変換します。
+> [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache License 2.0) の二次開発。**1つの環境変数**で、単一ユーザーの QwenPaw をマルチユーザープラットフォームに変換します。本派生プロジェクトはMITライセンスを採用しています。
 
 ---
 
-**License**: [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
+**License**: [MIT License](https://opensource.org/licenses/MIT)
 **ベースプロジェクト**: [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | Apache License 2.0  
 **Copyright**: Copyright 2024 QwenPawTeam Authors
 
