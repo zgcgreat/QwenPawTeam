@@ -320,16 +320,33 @@ function useMessageHistoryNavigation(
   const historyIndexRef = useRef<number>(-1);
   const draftRef = useRef<string>("");
 
+  /** Cached user messages to avoid re-computing on every keydown */
+  const userMessagesCacheRef = useRef<string[]>([]);
+  const cachedMessageCountRef = useRef<number>(0);
+
   const getUserMessagesWithText = useCallback((): string[] => {
     if (!chatRef.current?.messages?.getMessages) return [];
 
     const allMessages = chatRef.current.messages.getMessages();
     if (!Array.isArray(allMessages)) return [];
 
-    return allMessages
+    const currentCount = allMessages.length;
+    if (
+      userMessagesCacheRef.current.length > 0 &&
+      cachedMessageCountRef.current === currentCount
+    ) {
+      return userMessagesCacheRef.current;
+    }
+
+    const userMessages = allMessages
       .filter((msg) => msg.role === "user")
       .map((msg) => extractTextFromMessage(msg))
       .filter((text) => text.trim().length > 0);
+
+    userMessagesCacheRef.current = userMessages;
+    cachedMessageCountRef.current = currentCount;
+
+    return userMessages;
   }, [chatRef]);
 
   interface MessageResult {

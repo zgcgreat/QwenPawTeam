@@ -67,11 +67,13 @@ const SessionRow = React.memo(function SessionRow({
     : undefined;
   const isEditing = data.editingSessionId === session.id;
 
-const isDisabled =
+  const isDisabled =
     !!data.switchingSessionId && session.id !== data.switchingSessionId;
+
   return (
     <div style={style}>
       <ChatSessionItem
+        sessionId={session.id!}
         name={session.name || "New Chat"}
         time={formatCreatedAt(session.createdAt ?? null)}
         channelKey={channelKey || undefined}
@@ -83,13 +85,14 @@ const isDisabled =
         disabled={isDisabled}
         editing={isEditing}
         editValue={isEditing ? data.editValue : undefined}
-        onClick={() => data.handleSessionClick(id)}
-        onEdit={() => data.handleEditStart(id, session.name || "New Chat")}
-        onDelete={() => data.handleDelete(id)}
-        onPin={() => data.handlePinToggle(id)}
+        onClick={data.handleSessionClick}
+        onEdit={data.handleEditStart}
+        onDelete={data.handleDelete}
+        onPin={data.handlePinToggle}
         onEditChange={data.handleEditChange}
         onEditSubmit={data.handleEditSubmit}
         onEditCancel={data.handleEditCancel}
+        onContextMenu={data.handleItemContextMenu}
       />
     </div>
   );
