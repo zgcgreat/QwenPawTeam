@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from .models import ChatSpec, ChatUpdate
+from .models import ChatSpec, ChatUpdate, SessionSource
 from .repo import BaseChatRepository
 from ..channels.schema import DEFAULT_CHANNEL
 
@@ -83,6 +83,7 @@ class ChatManager:
         user_id: str,
         channel: str = DEFAULT_CHANNEL,
         name: str = "New Chat",
+        source: str | SessionSource = SessionSource.chat,
     ) -> ChatSpec:
         """Get existing chat or create new one.
 
@@ -118,13 +119,18 @@ class ChatManager:
             # Create new
             logger.debug(
                 f"get_or_create_chat: Creating new chat for "
-                f"session_id={session_id}",
+                f"session_id={session_id}, source={source}",
             )
+            try:
+                resolved_source = SessionSource(source)
+            except ValueError:
+                resolved_source = SessionSource.chat
             spec = ChatSpec(
                 session_id=session_id,
                 user_id=user_id,
                 channel=channel,
                 name=name,
+                source=resolved_source,
             )
             logger.debug(f"get_or_create_chat: created spec={spec.id}")
             # Call internal create without lock (already locked)
@@ -154,18 +160,52 @@ class ChatManager:
     ) -> Optional[ChatSpec]:
         """Merge a partial update into the latest persisted chat spec."""
         async with self._lock:
+            return await self._patch_locked(chat_id, patch)
+
+    async def patch_chat_if_name_matches(
+        self,
+        chat_id: str,
+        expected_name: str,
+        patch: ChatUpdate,
+    ) -> Optional[ChatSpec]:
+        """Atomic compare-and-set on ``ChatSpec.name``.
+
+        Apply ``patch`` only when the persisted name still equals
+        ``expected_name``. The read and write happen under a single lock
+        acquisition so a concurrent rename cannot slip in between, which
+        is what background tasks like async title generation rely on to
+        avoid clobbering a user-chosen name.
+
+        Returns the updated spec on success, ``None`` if the chat does
+        not exist or its name no longer matches.
+        """
+        async with self._lock:
+            existing = await self._repo.get_chat(chat_id)
+            if existing is None or existing.name != expected_name:
+                return None
+            return await self._patch_locked(chat_id, patch, existing=existing)
+
+    async def _patch_locked(
+        self,
+        chat_id: str,
+        patch: ChatUpdate,
+        *,
+        existing: Optional[ChatSpec] = None,
+    ) -> Optional[ChatSpec]:
+        """Internal patch helper. Caller must hold ``self._lock``."""
+        if existing is None:
             existing = await self._repo.get_chat(chat_id)
             if existing is None:
                 return None
 
-            updates = patch.model_dump(
-                exclude_none=True,
-                exclude_unset=True,
-            )
-            merged = existing.model_copy(update=updates)
-            merged.updated_at = datetime.now(timezone.utc)
-            await self._repo.upsert_chat(merged)
-            return merged
+        updates = patch.model_dump(
+            exclude_none=True,
+            exclude_unset=True,
+        )
+        merged = existing.model_copy(update=updates)
+        merged.updated_at = datetime.now(timezone.utc)
+        await self._repo.upsert_chat(merged)
+        return merged
 
     async def touch_chat(self, chat_id: str) -> Optional[ChatSpec]:
         """Refresh updated_at without rewriting other chat fields."""

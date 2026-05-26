@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, ORJSONResponse
 from agentscope_runtime.engine.app import AgentApp
 from agentscope_runtime.engine.schemas.exception import (
     AppBaseException,
@@ -29,16 +29,18 @@ from ..constant import (
     PROJECT_NAME,
 )
 from ..__version__ import __version__
+from ..backup._utils.safe_swap import cleanup_startup_restore_artifacts
 from ..utils.logging import (
     setup_logger,
     add_project_file_handler,
     LOG_FILE_PATH,
 )
 from ..utils.system_info import summarize_python_environment
-from .auth import AuthMiddleware
+from .auth import AuthMiddleware, auto_register_from_env
 from .routers import router as api_router, create_agent_scoped_router
 from .routers.agent_scoped import AgentContextMiddleware
 from .routers.approval import router as approval_router
+from .routers.coding_mode import router as coding_mode_router
 from .routers.voice import voice_router
 from ..envs import load_envs_into_environ
 from ..providers.provider_manager import ProviderManager
@@ -207,12 +209,12 @@ class DynamicMultiAgentRunner:
 runner = DynamicMultiAgentRunner()
 
 agent_app = AgentApp(
-    app_name="Friday",
+    app_name="QwenPaw",
     app_description="A helpful assistant with background task support",
     runner=runner,
     enable_stream_task=True,
     stream_task_queue="stream_query",
-    stream_task_timeout=300,
+    stream_task_timeout=1800,
 )
 
 
@@ -228,7 +230,17 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
     # Everything here must be lightweight so the server starts quickly.
     # ================================================================
 
-    from .auth import auto_register_from_env
+    try:
+        cleanup_startup_restore_artifacts()
+    except Exception as exc:
+        message = (
+            "QwenPaw startup failed because restore artifact cleanup did not "
+            "complete. Another restore or cleanup may still be running, or "
+            "a previous restore may need recovery before startup can safely "
+            "read restored files."
+        )
+        logger.error(message, exc_info=True)
+        raise RuntimeError(f"{message} Original error: {exc}") from exc
 
     auto_register_from_env()
 
@@ -335,6 +347,8 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
             ]
 
             plugin_loader = PluginLoader(plugin_dirs)
+
+            plugin_loader.registry.set_plugin_http_app(app)
 
             config = load_config(get_config_path())
             plugin_configs = (
@@ -535,6 +549,22 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
         except Exception as e:
             logger.error(f"Error stopping TokenUsageManager: {e}")
 
+        # Stop all browser instances
+        from ..agents.tools.browser_control import stop_all_browsers
+
+        try:
+            await stop_all_browsers()
+        except Exception as e:
+            logger.error(f"Error stopping browsers during shutdown: {e}")
+
+        # Close the shared httpx client owned by the skills hub module.
+        from ..agents.skill_system.hub import aclose_hub_client
+
+        try:
+            await aclose_hub_client()
+        except Exception as e:
+            logger.error(f"Error closing skills hub HTTP client: {e}")
+
         logger.info("Application shutdown complete")
 
 
@@ -543,6 +573,7 @@ app = FastAPI(
     docs_url="/docs" if DOCS_ENABLED else None,
     redoc_url="/redoc" if DOCS_ENABLED else None,
     openapi_url="/openapi.json" if DOCS_ENABLED else None,
+    default_response_class=ORJSONResponse,
 )
 
 # === Plugin Activation ===
@@ -663,10 +694,12 @@ app.include_router(api_router, prefix="/api")
 # Approval router: /api/approval/approve, /api/approval/deny, etc.
 app.include_router(approval_router, prefix="/api")
 
+# Coding Mode router: /api/coding-mode
+app.include_router(coding_mode_router, prefix="/api")
+
 # Agent-scoped router: /api/agents/{agentId}/chats, etc.
 agent_scoped_router = create_agent_scoped_router()
 app.include_router(agent_scoped_router, prefix="/api")
-
 
 app.include_router(
     agent_app.router,
@@ -709,7 +742,10 @@ if os.path.isdir(_CONSOLE_STATIC_DIR):
 
     # SPA fallback: catch-all route for frontend routing
     # Must be registered AFTER all API routes to avoid conflicts
-    @app.get("/{full_path:path}")
+    @app.get(
+        "/{full_path:path}",
+        name="qwenpaw_console_spa_catchall",
+    )
     def _console_spa(full_path: str):
         # Prevent catching common system/special paths
         if full_path in ("docs", "redoc", "openapi.json"):

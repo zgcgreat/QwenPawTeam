@@ -23,38 +23,43 @@ from agentscope_runtime.engine.schemas.exception import (
     AppBaseException,
 )
 
-from ...agents.skills_hub import (
+from ...agents.skill_system.hub import (
     SkillImportCancelled,
     search_hub_skills,
     import_pool_skill_from_hub,
     install_skill_from_hub,
 )
-from ...agents.skills_manager import (
-    _BUILTIN_SKILL_LANGUAGES,
+from ...agents.skill_system import (
     SkillConflictError,
     SkillPoolService,
-    SkillInfo,
     SkillService,
-    _default_pool_manifest,
-    _default_workspace_manifest,
-    _get_skill_mtime,
-    _mutate_json,
-    _read_skill_from_dir,
-    get_pool_builtin_update_notice,
+)
+from ...agents.skill_system.models import SkillInfo
+from ...agents.skill_system.registry import (
+    BUILTIN_SKILL_LANGUAGES,
     get_pool_builtin_sync_status,
-    get_pool_skill_manifest_path,
-    get_skill_pool_dir,
-    get_workspace_skill_manifest_path,
-    get_workspace_skills_dir,
+    get_pool_builtin_update_notice,
     import_builtin_skills,
     list_builtin_import_candidates,
     list_workspaces,
-    read_skill_pool_manifest,
-    read_skill_manifest,
     reconcile_pool_manifest,
     reconcile_workspace_manifest,
-    suggest_conflict_name,
     update_single_builtin,
+)
+from ...agents.skill_system.store import (
+    default_pool_manifest,
+    default_workspace_manifest,
+    get_pool_skill_manifest_path,
+    get_skill_mtime,
+    get_skill_pool_dir,
+    get_workspace_skill_manifest_path,
+    get_workspace_skills_dir,
+    mutate_json,
+    normalize_skill_manifest_entry,
+    read_skill_from_dir,
+    read_skill_manifest,
+    read_skill_pool_manifest,
+    suggest_conflict_name,
 )
 from ...security.skill_scanner import SkillScanError
 from ..utils import schedule_agent_reload
@@ -116,6 +121,7 @@ class SkillSpec(SkillInfo):
     tags: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
     last_updated: str = ""
+    installed_from: str = ""
 
 
 class PoolSkillSpec(SkillInfo):
@@ -128,6 +134,7 @@ class PoolSkillSpec(SkillInfo):
     tags: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
     last_updated: str = ""
+    installed_from: str = ""
 
 
 class WorkspaceSkillSummary(BaseModel):
@@ -143,6 +150,8 @@ class HubSkillSpec(BaseModel):
     description: str = ""
     version: str = ""
     source_url: str = ""
+    author: str = ""
+    icon_url: str = ""
 
 
 class BuiltinImportSpec(BaseModel):
@@ -331,9 +340,9 @@ def _restore_workspace_skill(snapshot: dict[str, Any]) -> None:
             return
         payload["skills"][skill_name] = copy.deepcopy(entry)
 
-    _mutate_json(
+    mutate_json(
         get_workspace_skill_manifest_path(workspace_dir),
-        _default_workspace_manifest(),
+        default_workspace_manifest(),
         _restore,
     )
     reconcile_workspace_manifest(workspace_dir)
@@ -429,17 +438,13 @@ async def _run_hub_install_task(
     await _hub_task_set_status(task_id, HubInstallTaskStatus.IMPORTING)
     imported_skill_name: str | None = None
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: install_skill_from_hub(
-                workspace_dir=workspace_dir,
-                bundle_url=body.bundle_url,
-                version=body.version,
-                enable=body.enable,
-                target_name=body.target_name,
-                cancel_checker=cancel_event.is_set,
-            ),
+        result = await install_skill_from_hub(
+            workspace_dir=workspace_dir,
+            bundle_url=body.bundle_url,
+            version=body.version,
+            enable=body.enable,
+            target_name=body.target_name,
+            cancel_checker=cancel_event.is_set,
         )
         imported_skill_name = result.name
         if cancel_event.is_set():
@@ -452,6 +457,7 @@ async def _run_hub_install_task(
                     "name": result.name,
                     "enabled": False,
                     "source_url": result.source_url,
+                    "installed_from": result.installed_from,
                 },
             )
             return
@@ -463,6 +469,7 @@ async def _run_hub_install_task(
                 "name": result.name,
                 "enabled": result.enabled,
                 "source_url": result.source_url,
+                "installed_from": result.installed_from,
             },
         )
     except SkillImportCancelled:
@@ -510,23 +517,39 @@ def _build_workspace_skill_specs(workspace_dir: Path) -> list[SkillSpec]:
     entries = manifest.get("skills", {})
     skill_root = get_workspace_skills_dir(workspace_dir)
     specs: list[SkillSpec] = []
-    for skill_name, entry in sorted(entries.items()):
-        source = entry.get("source", "customized")
-        skill_dir = skill_root / skill_name
-        skill = _read_skill_from_dir(skill_dir, source)
-        if skill is None:
-            continue
-        dump = skill.model_dump()
-        dump["tags"] = entry.get("tags") or []
-        specs.append(
-            SkillSpec(
-                **dump,
-                enabled=entry.get("enabled", False),
-                channels=entry.get("channels") or ["all"],
-                config=entry.get("config") or {},
-                last_updated=_get_skill_mtime(skill_dir),
-            ),
-        )
+    for skill_name, raw_entry in sorted(entries.items()):
+        entry = normalize_skill_manifest_entry(raw_entry)
+        if raw_entry not in (None, entry):
+            logger.warning(
+                "Skipping malformed workspace skill entry '%s' in manifest",
+                skill_name,
+            )
+        try:
+            source = entry.get("source", "customized")
+            skill_dir = skill_root / skill_name
+            skill = read_skill_from_dir(skill_dir, source)
+            if skill is None:
+                continue
+            dump = skill.model_dump()
+            dump["tags"] = entry.get("tags") or []
+            specs.append(
+                SkillSpec(
+                    **dump,
+                    enabled=entry.get("enabled", False),
+                    channels=entry.get("channels") or ["all"],
+                    config=entry.get("config") or {},
+                    last_updated=get_skill_mtime(skill_dir),
+                    installed_from=str(
+                        entry.get("installed_from", "") or "",
+                    ),
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "Skipping workspace skill '%s': failed to build spec",
+                skill_name,
+                exc_info=True,
+            )
     return specs
 
 
@@ -536,41 +559,57 @@ def _build_pool_skill_specs() -> list[PoolSkillSpec]:
     pool_dir = get_skill_pool_dir()
     sync_info = get_pool_builtin_sync_status(pool_skills=entries)
     specs: list[PoolSkillSpec] = []
-    for skill_name, entry in sorted(entries.items()):
-        source = entry.get("source", "customized")
-        skill_dir = pool_dir / skill_name
-        skill = _read_skill_from_dir(skill_dir, source)
-        if skill is None:
-            continue
-        info = sync_info.get(skill_name, {})
-        dump = skill.model_dump(exclude={"version_text"})
-        dump["tags"] = entry.get("tags") or []
-        specs.append(
-            PoolSkillSpec(
-                **dump,
-                protected=bool(entry.get("protected", False)),
-                version_text=str(entry.get("version_text", "") or ""),
-                commit_text=str(entry.get("commit_text", "") or ""),
-                sync_status=str(info.get("sync_status", "") or ""),
-                latest_version_text=str(
-                    info.get("latest_version_text", "") or "",
+    for skill_name, raw_entry in sorted(entries.items()):
+        entry = normalize_skill_manifest_entry(raw_entry)
+        if raw_entry not in (None, entry):
+            logger.warning(
+                "Skipping malformed pool skill entry '%s' in manifest",
+                skill_name,
+            )
+        try:
+            source = entry.get("source", "customized")
+            skill_dir = pool_dir / skill_name
+            skill = read_skill_from_dir(skill_dir, source)
+            if skill is None:
+                continue
+            info = sync_info.get(skill_name, {})
+            dump = skill.model_dump(exclude={"version_text"})
+            dump["tags"] = entry.get("tags") or []
+            specs.append(
+                PoolSkillSpec(
+                    **dump,
+                    protected=bool(entry.get("protected", False)),
+                    version_text=str(entry.get("version_text", "") or ""),
+                    commit_text=str(entry.get("commit_text", "") or ""),
+                    sync_status=str(info.get("sync_status", "") or ""),
+                    latest_version_text=str(
+                        info.get("latest_version_text", "") or "",
+                    ),
+                    builtin_language=str(
+                        entry.get("builtin_language", "") or "",
+                    ),
+                    available_builtin_languages=[
+                        str(language)
+                        for language in (
+                            info.get("available_languages")
+                            or entry.get("available_builtin_languages")
+                            or []
+                        )
+                        if str(language)
+                    ],
+                    config=entry.get("config") or {},
+                    last_updated=get_skill_mtime(skill_dir),
+                    installed_from=str(
+                        entry.get("installed_from", "") or "",
+                    ),
                 ),
-                builtin_language=str(
-                    entry.get("builtin_language", "") or "",
-                ),
-                available_builtin_languages=[
-                    str(language)
-                    for language in (
-                        info.get("available_languages")
-                        or entry.get("available_builtin_languages")
-                        or []
-                    )
-                    if str(language)
-                ],
-                config=entry.get("config") or {},
-                last_updated=_get_skill_mtime(skill_dir),
-            ),
-        )
+            )
+        except Exception:
+            logger.warning(
+                "Skipping pool skill '%s': failed to build spec",
+                skill_name,
+                exc_info=True,
+            )
     return specs
 
 
@@ -593,7 +632,7 @@ async def search_hub(
     q: str = "",
     limit: int = 20,
 ) -> list[HubSkillSpec]:
-    results = search_hub_skills(q, limit=limit)
+    results = await search_hub_skills(q, limit=limit)
     return [
         HubSkillSpec(
             slug=item.slug,
@@ -601,6 +640,8 @@ async def search_hub(
             description=item.description,
             version=item.version,
             source_url=item.source_url,
+            author=item.author,
+            icon_url=item.icon_url,
         )
         for item in results
     ]
@@ -902,7 +943,7 @@ async def import_skill_pool_from_hub(
     body: HubInstallRequest,
 ) -> dict[str, Any]:
     try:
-        result = import_pool_skill_from_hub(
+        result = await import_pool_skill_from_hub(
             bundle_url=body.bundle_url,
             version=body.version,
             target_name=body.target_name,
@@ -920,6 +961,7 @@ async def import_skill_pool_from_hub(
         "name": result.name,
         "enabled": False,
         "source_url": result.source_url,
+        "installed_from": result.installed_from,
     }
 
 
@@ -1110,11 +1152,11 @@ async def update_pool_builtin(
     body: UpdateBuiltinRequest | None = Body(default=None),
 ) -> dict[str, Any]:
     language = body.language if body is not None else ""
-    if language and language not in _BUILTIN_SKILL_LANGUAGES:
+    if language and language not in BUILTIN_SKILL_LANGUAGES:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid language '{language}', "
-            f"must be one of {_BUILTIN_SKILL_LANGUAGES}",
+            f"must be one of {BUILTIN_SKILL_LANGUAGES}",
         )
     try:
         return update_single_builtin(skill_name, language=language or None)
@@ -1156,7 +1198,7 @@ async def update_pool_skill_config(
         entry["config"] = dict(body.config)
         return True
 
-    updated = _mutate_json(manifest_path, _default_pool_manifest(), _update)
+    updated = mutate_json(manifest_path, default_pool_manifest(), _update)
     if not updated:
         raise HTTPException(status_code=404, detail="Pool skill not found")
     return {"updated": True}
@@ -1173,7 +1215,7 @@ async def delete_pool_skill_config(skill_name: str) -> dict[str, Any]:
         entry.pop("config", None)
         return True
 
-    updated = _mutate_json(manifest_path, _default_pool_manifest(), _update)
+    updated = mutate_json(manifest_path, default_pool_manifest(), _update)
     if not updated:
         raise HTTPException(status_code=404, detail="Pool skill not found")
     return {"cleared": True}
@@ -1260,9 +1302,14 @@ async def batch_disable_skills(
     request: Request,
     skills: list[str],
 ) -> dict[str, Any]:
-    workspace_dir = await _request_workspace_dir(request)
+    from ..agent_context import get_agent_for_request
+
+    workspace = await get_agent_for_request(request)
+    workspace_dir = Path(workspace.workspace_dir)
     service = SkillService(workspace_dir)
     results = {skill: service.disable_skill(skill) for skill in skills}
+    if any(result.get("success") for result in results.values()):
+        schedule_agent_reload(request, workspace.agent_id)
     return {"results": results}
 
 
@@ -1278,7 +1325,10 @@ async def batch_enable_skills(
         first item and ``reason="security_scan_failed"`` for the second,
         rather than aborting the entire batch.
     """
-    workspace_dir = await _request_workspace_dir(request)
+    from ..agent_context import get_agent_for_request
+
+    workspace = await get_agent_for_request(request)
+    workspace_dir = Path(workspace.workspace_dir)
     service = SkillService(workspace_dir)
     results: dict[str, Any] = {}
     for skill in skills:
@@ -1290,6 +1340,11 @@ async def batch_enable_skills(
                 "reason": "security_scan_failed",
                 "detail": _scan_error_payload(exc),
             }
+    if any(
+        isinstance(result, dict) and result.get("success")
+        for result in results.values()
+    ):
+        schedule_agent_reload(request, workspace.agent_id)
     return {"results": results}
 
 
@@ -1464,9 +1519,9 @@ async def update_skill_config_endpoint(
         entry["config"] = dict(body.config)
         return True
 
-    updated = _mutate_json(
+    updated = mutate_json(
         manifest_path,
-        _default_workspace_manifest(),
+        default_workspace_manifest(),
         _update,
     )
     if not updated:
@@ -1489,9 +1544,9 @@ async def delete_skill_config_endpoint(
         entry.pop("config", None)
         return True
 
-    updated = _mutate_json(
+    updated = mutate_json(
         manifest_path,
-        _default_workspace_manifest(),
+        default_workspace_manifest(),
         _update,
     )
     if not updated:

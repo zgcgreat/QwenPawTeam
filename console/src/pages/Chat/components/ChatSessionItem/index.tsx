@@ -30,6 +30,8 @@ interface ChatSessionItemProps {
   generating?: boolean;
   /** Whether this is the currently selected session */
   active?: boolean;
+  /** Whether clicks are disabled (e.g. during session switch) */
+  disabled?: boolean;
   /** Whether the item is in inline-edit mode */
   editing?: boolean;
   /** Current value of the edit input */
@@ -63,39 +65,46 @@ const ChatSessionItem: React.FC<ChatSessionItemProps> = (props) => {
     ? t("chat.statusInProgress")
     : t("chat.statusIdle");
 
-  const contextMenuItems: ContextMenuItem[] = useMemo(
-    () => [
-      {
-        key: "open",
-        label: t("chat.contextMenu.open", "Open"),
-        onClick: props.onClick,
-      },
-      {
-        key: "rename",
-        label: t("chat.contextMenu.rename", "Rename"),
-        onClick: props.onEdit,
-      },
-      {
-        key: "pin",
-        label: props.pinned
-          ? t("chat.contextMenu.unpin", "Unpin")
-          : t("chat.contextMenu.pin", "Pin"),
-        onClick: props.onPin,
-      },
-      { key: "divider-1", label: "", divider: true },
-      {
-        key: "delete",
-        label: t("chat.contextMenu.delete", "Delete"),
-        danger: true,
-        onClick: props.onDelete,
-      },
-    ],
-    [t, props.onClick, props.onEdit, props.onPin, props.onDelete, props.pinned],
+  const handleClick = useCallback(() => {
+    if (props.disabled) return;
+    props.onClick?.(props.sessionId);
+  }, [props.onClick, props.sessionId, props.disabled]);
+
+  const handleEdit = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      props.onEdit?.(props.sessionId, props.name);
+    },
+    [props.onEdit, props.sessionId, props.name],
+  );
+
+  const handleDelete = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      props.onDelete?.(props.sessionId);
+    },
+    [props.onDelete, props.sessionId],
+  );
+
+  const handlePin = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      props.onPin?.(props.sessionId);
+    },
+    [props.onPin, props.sessionId],
+  );
+
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      props.onContextMenu?.(props.sessionId, event);
+    },
+    [props.onContextMenu, props.sessionId],
   );
 
   const className = [
     styles.chatSessionItem,
     props.active ? styles.active : "",
+    props.disabled ? styles.disabled : "",
     props.editing ? styles.editing : "",
     props.pinned ? styles.pinned : "",
     props.className || "",

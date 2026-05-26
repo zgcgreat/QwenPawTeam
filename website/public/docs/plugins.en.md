@@ -9,6 +9,7 @@ The plugin system supports the following extension capabilities:
 - **Provider Plugins**: Add new LLM providers and models
 - **Hook Plugins**: Execute custom code during application startup/shutdown
 - **Command Plugins**: Register custom `/command` magic commands
+- **HTTP API Plugins**: Expose custom REST endpoints under `/api` via a FastAPI `APIRouter`
 - **Frontend Page Plugins**: Add custom pages to the sidebar
 - **Tool Renderer Plugins**: Customize how Agent tool-call results are displayed
 - **Behavior Extension Plugins**: Replace methods in frontend internal modules via the module registry
@@ -89,6 +90,7 @@ my-plugin/
   "id": "my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
+  "type": "general",
   "description": "Plugin description",
   "author": "Your Name",
   "entry": {
@@ -99,6 +101,36 @@ my-plugin/
   "meta": {}
 }
 ```
+
+#### Manifest Field Reference
+
+| Field            | Type               | Required | Description                                                                                                                                                                |
+| ---------------- | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`             | `string`           | yes      | Unique plugin identifier. Used as the install directory name; must not contain path separators.                                                                            |
+| `version`        | `string`           | yes      | Semantic version of the plugin (e.g. `1.0.0`).                                                                                                                             |
+| `name`           | `string` \| object | no       | Display name. Defaults to `id`. May also be `{"zh-CN": "...", "en-US": "..."}`; the first non-empty localised value is used (English preferred).                           |
+| `type`           | `string`           | no       | One of `tool`, `provider`, `hook`, `command`, `frontend`, `general`. When omitted, the type is inferred from `meta` / `entry` (legacy plugins). Prefer setting explicitly. |
+| `description`    | `string` \| object | no       | Short description shown in the plugin list. Localised form is accepted (see `name`).                                                                                       |
+| `author`         | `string`           | no       | Author or organisation name.                                                                                                                                               |
+| `entry.backend`  | `string`           | no\*     | Path (relative to plugin dir) of the Python entry file that exports `plugin`.                                                                                              |
+| `entry.frontend` | `string`           | no\*     | Path of the built frontend bundle (e.g. `dist/index.js`).                                                                                                                  |
+| `dependencies`   | `string[]`         | no       | Python package requirements installed via pip/uv at install time.                                                                                                          |
+| `min_version`    | `string`           | no       | Minimum QwenPaw version required. Defaults to `0.1.0`.                                                                                                                     |
+| `meta`           | `object`           | no       | Free-form plugin metadata. Used by the UI and by `type` inference (e.g. `meta.tools[]`, `meta.hook_type`, `meta.provider_id`).                                             |
+| `entry_point`    | `string`           | no       | **Legacy.** Equivalent to `entry.backend`. Still accepted for backwards compatibility with older plugins; new plugins should use `entry.backend`.                          |
+
+\* At least one of `entry.backend` / `entry.frontend` (or legacy `entry_point`) must be provided.
+
+#### `type` values
+
+| Value      | When to use                                                           |
+| ---------- | --------------------------------------------------------------------- |
+| `tool`     | Registers one or more agent tools (functions the LLM can call).       |
+| `provider` | Registers a custom LLM provider / model endpoint.                     |
+| `hook`     | Runs code during application startup or shutdown.                     |
+| `command`  | Registers one or more `/slash` control commands.                      |
+| `frontend` | Ships a frontend JS bundle loaded dynamically by the UI.              |
+| `general`  | Fallback for plugins that combine multiple capabilities or don't fit. |
 
 #### plugin.py
 
@@ -158,6 +190,7 @@ my-plugin/
   "id": "my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
+  "type": "frontend",
   "author": "Your Name",
   "entry": { "frontend": "dist/index.js" }
 }
@@ -279,6 +312,7 @@ cd my-llm-provider
   "id": "my-llm-provider",
   "name": "My LLM Provider",
   "version": "1.0.0",
+  "type": "provider",
   "description": "Custom LLM provider for enterprise",
   "author": "Your Name",
   "entry": {
@@ -414,6 +448,7 @@ cd monitoring-hook
   "id": "monitoring-hook",
   "name": "Monitoring Hook",
   "version": "1.0.0",
+  "type": "hook",
   "description": "Initialize monitoring service at startup",
   "author": "Your Name",
   "entry": {
@@ -503,6 +538,7 @@ cd status-command
   "id": "status-command",
   "name": "Status Command",
   "version": "1.0.0",
+  "type": "command",
   "description": "Custom status command",
   "author": "Your Name",
   "entry": {
@@ -648,6 +684,7 @@ mkdir welcome-plugin && cd welcome-plugin
   "id": "welcome-plugin",
   "name": "Welcome Plugin",
   "version": "1.0.0",
+  "type": "frontend",
   "description": "Welcome page plugin",
   "author": "Your Name",
   "entry": { "frontend": "dist/index.js" }
@@ -764,6 +801,7 @@ mkdir tool-render-plugin && cd tool-render-plugin
   "id": "tool-render-plugin",
   "name": "Tool Render Plugin",
   "version": "1.0.0",
+  "type": "frontend",
   "description": "Custom tool result renderer",
   "author": "Your Name",
   "entry": { "frontend": "dist/index.js" }
@@ -844,6 +882,7 @@ mkdir custom-greeting-plugin && cd custom-greeting-plugin
   "id": "custom-greeting-plugin",
   "name": "Custom Greeting",
   "version": "1.0.0",
+  "type": "frontend",
   "description": "Customize chat greeting",
   "author": "Your Name",
   "entry": { "frontend": "dist/index.js" }
@@ -895,6 +934,169 @@ npm install && npm run build
 cp -r . ~/.qwenpaw/plugins/custom-greeting-plugin/
 qwenpaw app
 ```
+
+### Example 7: Expose a FastAPI Endpoint
+
+Backend plugins can expose their own HTTP endpoints by registering a
+`fastapi.APIRouter`. The router is mounted under `/api` + your prefix
+and is served by the same FastAPI app as QwenPaw's core API, so it
+shares CORS settings, the auth layer, and is included in
+`/openapi.json` / `/docs`.
+
+In this example we add a small `/api/pets` endpoint that returns a
+list of pets and lets the user add new ones.
+
+#### 1. Create plugin directory
+
+```bash
+mkdir pet-api-plugin && cd pet-api-plugin
+```
+
+#### 2. Create plugin.json
+
+```json
+{
+  "id": "pet-api-plugin",
+  "name": "Pet API Plugin",
+  "version": "1.0.0",
+  "type": "general",
+  "description": "Expose a small REST API under /api/pets",
+  "author": "Your Name",
+  "entry": {
+    "backend": "plugin.py"
+  },
+  "dependencies": [],
+  "min_version": "1.1.5"
+}
+```
+
+#### 3. Create plugin.py
+
+```python
+# -*- coding: utf-8 -*-
+"""Pet API Plugin Entry Point."""
+
+import logging
+from typing import List
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from qwenpaw.plugins.api import PluginApi
+
+logger = logging.getLogger(__name__)
+
+
+class Pet(BaseModel):
+    """Pet model."""
+
+    id: int
+    name: str
+    species: str
+
+
+class PetCreate(BaseModel):
+    """Pet creation payload."""
+
+    name: str
+    species: str
+
+
+_PETS: List[Pet] = [
+    Pet(id=1, name="Mochi", species="cat"),
+    Pet(id=2, name="Bao", species="dog"),
+]
+
+
+def build_router() -> APIRouter:
+    """Build the plugin's APIRouter.
+
+    Routes are mounted under ``/api`` + the prefix passed to
+    ``register_http_router``. With ``prefix="/pets"`` the handlers
+    below are served at ``/api/pets`` and ``/api/pets/{pet_id}``.
+    """
+    router = APIRouter()
+
+    @router.get("", response_model=List[Pet])
+    def list_pets() -> List[Pet]:
+        """Return all pets."""
+        return list(_PETS)
+
+    @router.get("/{pet_id}", response_model=Pet)
+    def get_pet(pet_id: int) -> Pet:
+        """Return a single pet by id."""
+        for pet in _PETS:
+            if pet.id == pet_id:
+                return pet
+        raise HTTPException(status_code=404, detail="Pet not found")
+
+    @router.post("", response_model=Pet, status_code=201)
+    def create_pet(payload: PetCreate) -> Pet:
+        """Create a new pet."""
+        new_id = (max((p.id for p in _PETS), default=0)) + 1
+        pet = Pet(id=new_id, name=payload.name, species=payload.species)
+        _PETS.append(pet)
+        return pet
+
+    return router
+
+
+class PetApiPlugin:
+    """Pet API Plugin."""
+
+    def register(self, api: PluginApi):
+        """Register the HTTP router.
+
+        Args:
+            api: PluginApi instance
+        """
+        logger.info("Registering Pet API plugin...")
+
+        api.register_http_router(
+            build_router(),
+            prefix="/pets",
+            tags=["pets"],
+        )
+
+        logger.info("✓ Pet API registered at /api/pets")
+
+
+# Export plugin instance
+plugin = PetApiPlugin()
+```
+
+#### 4. Install and try it out
+
+```bash
+qwenpaw plugin install pet-api-plugin
+```
+
+Once QwenPaw is running:
+
+```bash
+# List pets
+curl http://127.0.0.1:8088/api/pets
+
+# Get one pet
+curl http://127.0.0.1:8088/api/pets/1
+
+# Create a pet
+curl -X POST http://127.0.0.1:8088/api/pets \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Luna", "species": "rabbit"}'
+```
+
+**Notes:**
+
+- `prefix` must start with `/` and must not be just `/` — use a
+  descriptive segment such as `/pets`. The full URL is always
+  `/api` + your prefix.
+- Each prefix can only be claimed by one plugin. Registering the
+  same prefix twice raises `ValueError`.
+- `tags` is optional; when omitted, routes are tagged
+  `plugin:<plugin_id>` automatically for OpenAPI grouping.
+- Routes are unmounted automatically when the plugin is uninstalled
+  or disabled.
 
 ## Dependency Management
 
@@ -1074,6 +1276,22 @@ api.register_shutdown_hook(
 )
 ```
 
+### register_http_router
+
+Mount a `fastapi.APIRouter` under `/api` + _prefix_.
+
+```python
+api.register_http_router(
+    router: APIRouter,             # fastapi.APIRouter instance
+    *,
+    prefix: str,                   # Path under /api, e.g. "/pets"
+    tags: Optional[List[str]] = None,  # OpenAPI tags (optional)
+)
+```
+
+See [Example 7](#example-7-expose-a-fastapi-endpoint) for a full
+walkthrough.
+
 ## Advanced Features
 
 ### Monkey Patching
@@ -1143,3 +1361,51 @@ A: Yes, through monkey patching or hook mechanisms. But use with caution to avoi
 ### Q: Will plugins conflict with each other?
 
 A: If multiple plugins register the same provider_id or command_name, the later one will override the earlier one. Use unique IDs.
+
+## Example Plugins
+
+### GPT Image 2 Tool Plugin
+
+A tool plugin that adds OpenAI's GPT Image 2 image generation capability to QwenPaw agents.
+
+**Requirements:**
+
+- Minimum QwenPaw version: `1.1.5`
+
+**Installation:**
+
+```bash
+# Clone the QwenPaw repository (if not already cloned)
+git clone https://github.com/agentscope-ai/QwenPaw.git
+cd QwenPaw
+
+# Install the plugin
+qwenpaw plugin install plugins/tool/gpt-image2
+```
+
+**Configuration:**
+
+1. After installation, restart QwenPaw
+2. Go to Agent Settings → Tools
+3. Find "generate_image_gpt" tool
+4. Click "Configure" and enter your OpenAI API Key
+5. Enable the tool
+
+**Usage:**
+
+Once configured, agents can generate images by calling the tool:
+
+```
+User: Please generate an image of a cute cat playing in a garden
+Agent: [Calls generate_image_gpt tool]
+       [Returns generated image]
+```
+
+**Features:**
+
+- Supports multiple image sizes: 1024x1024, 1024x1792, 1792x1024
+- Quality options: low, medium, high, auto
+- Automatic API key validation
+- Per-agent configuration (each agent can have its own API key)
+
+For more details, see `plugins/tool/gpt-image2/README.md`.

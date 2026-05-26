@@ -78,6 +78,11 @@ async def create_channel_service(ws: "Workspace", _):
     from ...config import Config, update_last_dispatch
     from ..channels.manager import ChannelManager
     from ..channels.utils import make_process_from_runner
+    from ..channels.access_control import init_access_control_store
+
+    # Initialise the access-control store for this workspace so that
+    # each workspace maintains its own access_control.json.
+    init_access_control_store(ws.workspace_dir)
 
     temp_config = Config(channels=ws._config.channels)
     runner = ws._service_manager.services["runner"]
@@ -101,6 +106,11 @@ async def create_channel_service(ws: "Workspace", _):
     # Inject workspace into ChannelManager and all channels
     cm.set_workspace(ws)
 
+    # Propagate agent language to channels for i18n deny messages
+    agent_language = getattr(ws._config, "language", "zh") or "zh"
+    for ch in cm.channels:
+        ch._language = agent_language
+
     # Inject workspace into runner for control command handlers
     runner.set_workspace(ws)
 
@@ -110,6 +120,12 @@ async def create_channel_service(ws: "Workspace", _):
 
 async def create_agent_config_watcher(ws: "Workspace", _):
     """Create agent config watcher if channel/cron exists.
+
+    The watcher only triggers reloads via ``MultiAgentManager`` and
+    does not need direct references to channel/cron managers anymore.
+    Creation is still gated on having at least one of them, since
+    workspaces with neither have no externally-visible state that
+    benefits from auto-reload.
 
     Args:
         ws: Workspace instance
@@ -130,8 +146,7 @@ async def create_agent_config_watcher(ws: "Workspace", _):
     watcher = AgentConfigWatcher(
         agent_id=ws.agent_id,
         workspace_dir=ws.workspace_dir,
-        channel_manager=channel_mgr,
-        cron_manager=cron_mgr,
+        workspace=ws,
     )
     ws._service_manager.services["agent_config_watcher"] = watcher
     return watcher

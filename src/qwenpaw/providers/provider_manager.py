@@ -39,7 +39,6 @@ from ..security.secret_store import (
 
 logger = logging.getLogger(__name__)
 
-
 # -------------------------------------------------------
 # Built-in provider definitions and their default models.
 # -------------------------------------------------------
@@ -81,6 +80,44 @@ DASHSCOPE_MODELS: List[ModelInfo] = [
         name="DeepSeek-V3.2",
         supports_image=False,
         supports_video=False,
+        probe_source="documentation",
+    ),
+]
+
+ALIYUN_TOKENPLAN_MODELS: List[ModelInfo] = [
+    ModelInfo(
+        id="qwen3.6-plus",
+        name="Qwen3.6 Plus",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="glm-5",
+        name="GLM-5",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="MiniMax-M2.5",
+        name="MiniMax M2.5",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="deepseek-v3.2",
+        name="DeepSeek-V3.2",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="kimi-k2.5",
+        name="Kimi K2.5",
+        supports_image=True,
+        supports_video=True,
         probe_source="documentation",
     ),
 ]
@@ -279,6 +316,76 @@ OPENCODE_MODELS: List[ModelInfo] = [
         probe_source="documentation",
         is_free=True,
     ),
+    ModelInfo(
+        id="glm-5.1",
+        name="GLM-5.1",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="glm-5",
+        name="GLM-5",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="kimi-k2.5",
+        name="Kimi K2.5",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="kimi-k2.6",
+        name="Kimi K2.6",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="deepseek-v4-pro",
+        name="DeepSeek V4 Pro",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="deepseek-v4-flash",
+        name="DeepSeek V4 Flash",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="mimo-v2.5",
+        name="MiMo-V2.5",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="mimo-v2.5-pro",
+        name="MiMo-V2.5-Pro",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="qwen3.6-plus",
+        name="Qwen3.6 Plus",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="qwen3.5-plus",
+        name="Qwen3.5 Plus",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
 ]
 
 AZURE_OPENAI_MODELS: List[ModelInfo] = [
@@ -447,6 +554,145 @@ DEEPSEEK_MODELS: List[ModelInfo] = [
     ),
 ]
 
+VOLCENGINE_MODELS: List[ModelInfo] = [
+    ModelInfo(
+        id="doubao-seed-2-0-code-preview-260215",
+        name="Doubao-Seed-2.0-Code",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-2-0-pro-260215",
+        name="Doubao-Seed-2.0-pro",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-2-0-lite-260428",
+        name="Doubao-Seed-2.0-lite",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-code-preview-251028",
+        name="Doubao-Seed-Code",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="glm-4-7-251222",
+        name="GLM-4.7",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="deepseek-v3-2-251201",
+        name="DeepSeek-V3.2",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="doubao-seed-1-8-251228",
+        name="Doubao-Seed-1.8",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-2-0-mini-260428",
+        name="Doubao-Seed-2.0-mini",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-character-251128",
+        name="Doubao-Seed-Character",
+        supports_image=False,
+        supports_video=False,
+        probe_source="documentation",
+    ),
+]
+
+VOLCENGINE_CODINGPLAN_MODELS: List[ModelInfo] = [
+    ModelInfo(
+        id="doubao-seed-2-0-code-preview-260215",
+        name="Doubao-Seed-2.0-Code",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-2-0-pro-260215",
+        name="Doubao-Seed-2.0-pro",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-2-0-lite-260428",
+        name="Doubao-Seed-2.0-lite",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="doubao-seed-code-preview-251028",
+        name="Doubao-Seed-Code",
+        supports_image=True,
+        supports_video=True,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="glm-5.1",
+        name="GLM-5.1",
+        supports_image=False,
+        supports_video=False,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="minimax-m2.7",
+        name="MiniMax-M2.7",
+        supports_image=False,
+        supports_video=False,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="kimi-k2.6",
+        name="Kimi-K2.6",
+        supports_image=False,
+        supports_video=False,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="kimi-k2.5",
+        name="Kimi-K2.5",
+        supports_image=False,
+        supports_video=False,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="glm-4-7-251222",
+        name="GLM-4.7",
+        supports_image=False,
+        supports_video=False,
+        probe_source="probed",
+    ),
+    ModelInfo(
+        id="deepseek-v3-2-251201",
+        name="DeepSeek-V3.2",
+        supports_image=False,
+        supports_video=False,
+        probe_source="probed",
+    ),
+]
+
 ANTHROPIC_MODELS: List[ModelInfo] = []
 
 GEMINI_MODELS: List[ModelInfo] = [
@@ -516,7 +762,25 @@ PROVIDER_DASHSCOPE = OpenAIProvider(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     api_key_prefix="sk",
     models=DASHSCOPE_MODELS,
-    freeze_url=True,
+    meta={
+        "base_url_options": [
+            {
+                "label": "China (Beijing)",
+                "value": "https://dashscope.aliyuncs.com/"
+                "compatible-mode/v1",
+            },
+            {
+                "label": "International (Singapore)",
+                "value": "https://dashscope-intl.aliyuncs.com/"
+                "compatible-mode/v1",
+            },
+            {
+                "label": "US (Virginia)",
+                "value": "https://dashscope-us.aliyuncs.com/"
+                "compatible-mode/v1",
+            },
+        ],
+    },
 )
 
 PROVIDER_ALIYUN_CODINGPLAN = OpenAIProvider(
@@ -537,6 +801,18 @@ PROVIDER_ALIYUN_CODINGPLAN_INTL = OpenAIProvider(
     api_key_prefix="sk-sp",
     models=ALIYUN_CODINGPLAN_MODELS,
     # This provider doesn't support connection check without model config
+    support_connection_check=False,
+    freeze_url=True,
+)
+
+PROVIDER_ALIYUN_TOKENPLAN = OpenAIProvider(
+    id="aliyun-tokenplan",
+    name="Aliyun Token Plan",
+    base_url=(
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    ),
+    api_key_prefix="sk-sp",
+    models=ALIYUN_TOKENPLAN_MODELS,
     support_connection_check=False,
     freeze_url=True,
 )
@@ -601,7 +877,13 @@ PROVIDER_OPENCODE = OpenAIProvider(
     base_url="https://opencode.ai/zen/v1",
     api_key_prefix="",
     models=OPENCODE_MODELS,
-    freeze_url=True,
+    meta={
+        "base_url_options": [
+            {"label": "OpenCode", "value": "https://opencode.ai/zen/v1"},
+            {"label": "OpenCode Go", "value": "https://opencode.ai/zen/go/v1"},
+        ],
+    },
+    freeze_url=False,
     require_api_key=False,
 )
 
@@ -668,7 +950,7 @@ PROVIDER_ANTHROPIC = AnthropicProvider(
     api_key_prefix="sk-ant-",
     models=ANTHROPIC_MODELS,
     chat_model="AnthropicChatModel",
-    freeze_url=True,
+    freeze_url=False,
 )
 
 PROVIDER_GEMINI = GeminiProvider(
@@ -730,6 +1012,27 @@ PROVIDER_SILICONFLOW_INTL = OpenAIProvider(
     require_api_key=True,
 )
 
+PROVIDER_VOLCENGINE_CN = OpenAIProvider(
+    id="volcengine-cn",
+    name="Volcano Engine",
+    base_url="https://ark.cn-beijing.volces.com/api/v3",
+    api_key_prefix="",
+    models=VOLCENGINE_MODELS,
+    freeze_url=True,
+    support_model_discovery=False,
+)
+
+PROVIDER_VOLCENGINE_CN_CODINGPLAN = OpenAIProvider(
+    id="volcengine-cn-codingplan",
+    name="Volcano Engine Coding Plan",
+    base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
+    api_key_prefix="",
+    models=VOLCENGINE_CODINGPLAN_MODELS,
+    support_connection_check=False,
+    freeze_url=True,
+    support_model_discovery=False,
+)
+
 
 class ProviderManager:  # pylint: disable=too-many-public-methods
     """A manager class to handle all providers,
@@ -780,6 +1083,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self._add_builtin(PROVIDER_DASHSCOPE)
         self._add_builtin(PROVIDER_ALIYUN_CODINGPLAN)
         self._add_builtin(PROVIDER_ALIYUN_CODINGPLAN_INTL)
+        self._add_builtin(PROVIDER_ALIYUN_TOKENPLAN)
         self._add_builtin(PROVIDER_OPENCODE)
         self._add_builtin(PROVIDER_OPENAI)
         self._add_builtin(PROVIDER_AZURE_OPENAI)
@@ -796,6 +1100,8 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self._add_builtin(PROVIDER_ZHIPU_INTL_CODINGPLAN)
         self._add_builtin(PROVIDER_SILICONFLOW_CN)
         self._add_builtin(PROVIDER_SILICONFLOW_INTL)
+        self._add_builtin(PROVIDER_VOLCENGINE_CN)
+        self._add_builtin(PROVIDER_VOLCENGINE_CN_CODINGPLAN)
 
     def _add_builtin(self, provider: Provider):
         self.builtin_providers[provider.id] = provider
@@ -1271,6 +1577,35 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         except OSError:
             pass
 
+    def save_provider_config(
+        self,
+        provider_id: str,
+        provider: Provider | None = None,
+    ) -> None:
+        """Persist the current in-memory provider state to disk.
+
+        Args:
+            provider_id: The provider to save.
+            provider: Optional pre-resolved provider instance. When
+                supplied, this instance is saved directly — important
+                for plugin providers where ``get_provider`` returns a
+                fresh copy each time.
+        """
+        if provider is None:
+            provider = self.get_provider(provider_id)
+        if provider is None:
+            return
+        is_plugin = provider_id in self.plugin_providers
+        if is_plugin:
+            provider_info = ProviderInfo(**provider.model_dump())
+            self.plugin_providers[provider_id]["info"] = provider_info
+            self._save_plugin_provider(provider)
+        else:
+            self._save_provider(
+                provider,
+                is_builtin=provider_id in self.builtin_providers,
+            )
+
     def load_provider(
         self,
         provider_id: str,
@@ -1526,6 +1861,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
     def _init_from_storage(self):
         """Initialize all providers and active model from disk storage."""
         # Load built-in providers
+        # pylint: disable=too-many-nested-blocks
         for builtin in self.builtin_providers.values():
             provider = self.load_provider(builtin.id, is_builtin=True)
             if provider:
@@ -1533,6 +1869,10 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 if not builtin.freeze_url:
                     builtin.base_url = provider.base_url
                 builtin.api_key = provider.api_key
+                if provider.auth_mode != "api_key":
+                    builtin.auth_mode = provider.auth_mode
+                if provider.custom_headers:
+                    builtin.custom_headers = provider.custom_headers
                 builtin_model_ids = {m.id for m in builtin.models}
                 builtin.extra_models = [
                     m
@@ -1540,26 +1880,39 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     if m.id not in builtin_model_ids
                 ]
                 builtin.generate_kwargs.update(provider.generate_kwargs)
-                # Restore per-model generate_kwargs for built-in models.
+                # Restore per-model config for built-in models.
                 # Collect from both stored built-in models and promoted
                 # extra_models (models that were user-added but are now
                 # part of the built-in list).
-                stored_model_kwargs: dict = {}
+                stored_model_config: dict = {}
                 for m in provider.models:
-                    if m.generate_kwargs:
-                        stored_model_kwargs[m.id] = m.generate_kwargs
+                    stored_model_config[m.id] = {
+                        "generate_kwargs": m.generate_kwargs,
+                        "max_tokens": m.max_tokens,
+                        "max_input_length": m.max_input_length,
+                    }
                 for m in provider.extra_models:
-                    if m.id in builtin_model_ids and m.generate_kwargs:
-                        stored_model_kwargs.setdefault(
+                    if m.id in builtin_model_ids:
+                        stored_model_config.setdefault(
                             m.id,
-                            m.generate_kwargs,
+                            {
+                                "generate_kwargs": m.generate_kwargs,
+                                "max_tokens": m.max_tokens,
+                                "max_input_length": m.max_input_length,
+                            },
                         )
-                if stored_model_kwargs:
+                if stored_model_config:
                     for model in builtin.models:
-                        if model.id in stored_model_kwargs:
-                            model.generate_kwargs = stored_model_kwargs[
-                                model.id
-                            ]
+                        cfg = stored_model_config.get(model.id)
+                        if cfg:
+                            if cfg["generate_kwargs"]:
+                                model.generate_kwargs = cfg["generate_kwargs"]
+                            if cfg["max_tokens"] is not None:
+                                model.max_tokens = cfg["max_tokens"]
+                            if cfg["max_input_length"] is not None:
+                                model.max_input_length = cfg[
+                                    "max_input_length"
+                                ]
         # Load custom providers
         for provider_file in self.custom_path.glob("*.json"):
             provider = self.load_provider(provider_file.stem, is_builtin=False)
@@ -1757,6 +2110,33 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             f"✓ Registered plugin provider: {provider_id} "
             f"with {len(default_models)} default model(s)",
         )
+
+    def unregister_plugin_provider(self, provider_id: str) -> bool:
+        """Remove a plugin provider from memory.
+
+        Removes the provider from ``self.plugin_providers`` so it no
+        longer appears in the model list.  The persisted configuration
+        file (``plugin_path/{provider_id}.json``) is intentionally
+        kept on disk so that user-configured keys survive a
+        reinstall.
+
+        Args:
+            provider_id: Plugin provider identifier to remove.
+
+        Returns:
+            ``True`` if the provider was found and removed,
+            ``False`` if it was not registered.
+        """
+        if provider_id not in self.plugin_providers:
+            logger.warning(
+                f"unregister_plugin_provider: '{provider_id}' not found",
+            )
+            return False
+        del self.plugin_providers[provider_id]
+        logger.info(
+            f"Unregistered plugin provider '{provider_id}' from memory",
+        )
+        return True
 
     @staticmethod
     def get_instance() -> "ProviderManager":

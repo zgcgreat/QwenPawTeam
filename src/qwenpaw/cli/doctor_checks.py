@@ -8,8 +8,10 @@ import asyncio
 import importlib
 import importlib.util
 import json
+import ntpath
 import os
 import platform
+import subprocess
 import shutil
 import sqlite3
 import sys
@@ -18,7 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ..__version__ import __version__
-from ..agents.skills_manager import (
+from ..agents.skill_system import (
     get_workspace_skills_dir,
     read_skill_manifest,
 )
@@ -249,6 +251,101 @@ def load_raw_config_dict() -> dict[str, Any] | None:
         return None
     data = _read_config_data(path)
     return data if isinstance(data, dict) else None
+
+
+def _windows_long_paths_enabled() -> tuple[bool | None, str | None]:
+    """Read Windows long-path support from registry, if available."""
+    try:
+        import winreg  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return None, "winreg is unavailable"
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+    except OSError as exc:
+        return None, str(exc)
+    return bool(value), None
+
+
+def _powershell_language_mode(
+    executable: str,
+) -> tuple[str | None, str | None]:
+    """Return PowerShell language mode without mutating user state."""
+    try:
+        completed = subprocess.run(
+            [
+                executable,
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$ExecutionContext.SessionState.LanguageMode",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, str(exc)
+
+    output = (completed.stdout or "").strip()
+    if completed.returncode == 0 and output:
+        return output.splitlines()[-1].strip(), None
+    error = (completed.stderr or "").strip()
+    return None, error or f"exit code {completed.returncode}"
+
+
+def windows_environment_lines() -> list[str]:
+    """Windows-specific read-only diagnostics for ``qwenpaw doctor``."""
+    if platform.system() != "Windows":
+        return []
+
+    lines: list[str] = []
+    enabled, err = _windows_long_paths_enabled()
+    if enabled is True:
+        lines.append("Long paths: enabled")
+    elif enabled is False:
+        lines.append(
+            "Long paths: disabled; deeply nested workspaces, skills, "
+            "caches, or package installs may fail over 260 characters",
+        )
+    else:
+        detail = f"; {err}" if err else ""
+        lines.append(f"Long paths: unknown{detail}")
+
+    cwd_len = len(str(WORKING_DIR))
+    cwd_line = f"Current working directory length: {cwd_len}"
+    if cwd_len >= 220:
+        cwd_line += "; close to Windows MAX_PATH"
+    lines.append(cwd_line)
+
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    pwsh = shutil.which("pwsh.exe") or shutil.which("pwsh")
+    if powershell:
+        lines.append(f"PowerShell: found {ntpath.basename(powershell)}")
+        executable = powershell
+    elif pwsh:
+        lines.append(f"PowerShell: found {ntpath.basename(pwsh)}")
+        executable = pwsh
+    else:
+        lines.append("PowerShell: not found on PATH")
+        return lines
+
+    mode, mode_err = _powershell_language_mode(executable)
+    if mode:
+        mode_line = f"PowerShell language mode: {mode}"
+        if mode == "ConstrainedLanguage":
+            mode_line += "; some scripts may be restricted"
+        lines.append(mode_line)
+    else:
+        detail = f"; {mode_err}" if mode_err else ""
+        lines.append(f"PowerShell language mode: unknown{detail}")
+    return lines
 
 
 def scan_unknown_config_keys(raw: dict[str, Any]) -> list[str]:
@@ -583,7 +680,7 @@ def memory_embedding_notes(cfg: Config) -> list[str]:
 
 
 def workspace_hygiene_notes(cfg: Config) -> list[str]:
-    """Large prompt files, heavy tool_result/dialog dirs; memory tree size."""
+    """Large prompt files, heavy tool_results/dialog dirs; memory tree size."""
     notes: list[str] = []
     bootstrap_names = (
         "AGENTS.md",
@@ -609,7 +706,7 @@ def workspace_hygiene_notes(cfg: Config) -> list[str]:
                     "burn context; consider splitting or summarizing.",
                 )
         for sub, many, label in (
-            ("tool_result", _TOOL_RESULT_MANY, "tool_result"),
+            ("tool_results", _TOOL_RESULT_MANY, "tool_results"),
             ("dialog", _DIALOG_MANY, "dialog"),
         ):
             d = wd / sub
@@ -858,7 +955,7 @@ def enabled_channel_notes(cfg: Config) -> list[str]:
                         f"{agent_id}: xiaoyi enabled but "
                         "ak/sk/agent_id incomplete",
                     )
-            elif name == "weixin":
+            elif name == "wechat":
                 tok = (sub.bot_token or "").strip()
                 fp = (sub.bot_token_file or "").strip()
                 if tok:
@@ -867,12 +964,12 @@ def enabled_channel_notes(cfg: Config) -> list[str]:
                     p = Path(fp).expanduser()
                     if not p.is_file():
                         notes.append(
-                            f"{agent_id}: weixin enabled but "
+                            f"{agent_id}: wechat enabled but "
                             f"bot_token_file missing: {p}",
                         )
                 else:
                     notes.append(
-                        f"{agent_id}: weixin enabled but bot_token and "
+                        f"{agent_id}: wechat enabled but bot_token and "
                         "bot_token_file unset",
                     )
             elif name == "imessage":

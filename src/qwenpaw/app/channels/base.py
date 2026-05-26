@@ -36,6 +36,7 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
 
 from .renderer import MessageRenderer, RenderStyle
 from .schema import ChannelType
+from .access_control import get_access_control_store
 from ...config.utils import load_config
 
 # Optional callback to enqueue payload (set by manager)
@@ -109,6 +110,13 @@ class BaseChannel(ABC):
         """
         return []
 
+    # If True, streaming delta events (reasoning + message) are dispatched
+    # to ``on_streaming_start`` / ``on_streaming_delta`` / ``on_streaming_end``
+    # hooks *in addition to* the existing completed-message path.
+    # Subclasses that support real-time text streaming should set this to True
+    # (either as class attr or via __init__ / from_config).
+    streaming_enabled: bool = False
+
     def __init__(
         self,
         process: ProcessHandler,
@@ -121,17 +129,26 @@ class BaseChannel(ABC):
         allow_from: Optional[list] = None,
         deny_message: str = "",
         require_mention: bool = False,
+        streaming_enabled: bool = False,
+        access_control_dm: bool = False,
+        access_control_group: bool = False,
     ):
         self._process = process
         self._on_reply_sent = on_reply_sent
         self._show_tool_details = show_tool_details
         self._filter_tool_messages = filter_tool_messages
         self._filter_thinking = filter_thinking
+        self.streaming_enabled = streaming_enabled
+        # Legacy fields — stored for backward compat but not used for
+        # filtering (new ACL gate handles access control).
         self.dm_policy = dm_policy or "open"
         self.group_policy = group_policy or "open"
         self.allow_from = set(allow_from or [])
         self.deny_message = deny_message or ""
         self.require_mention = require_mention
+        self.access_control_dm = access_control_dm
+        self.access_control_group = access_control_group
+        self._language = "zh"
         self._enqueue: EnqueueCallback = None
         self._workspace = None
         cfg = load_config()
@@ -312,29 +329,113 @@ class BaseChannel(ABC):
         merged = pending + list(content_parts)
         return (True, merged)
 
-    def _check_allowlist(
-        self,
-        sender_id: str,
-        is_group: bool,
-    ) -> tuple[bool, Optional[str]]:
-        """Check sender against allowlist policy."""
-        policy = self.group_policy if is_group else self.dm_policy
-        if policy == "open":
-            return True, None
-        if sender_id in self.allow_from:
-            return True, None
-        if self.deny_message:
-            return False, self.deny_message
-        if is_group:
-            return (
-                False,
-                "Sorry, this bot is only available to authorized users.",
+    # ── Access-control i18n messages ───────────────────────────────────
+
+    _ACL_I18N = {
+        "blocked": {
+            "zh": "您已被禁止访问此智能体。",
+            "en": "You have been blocked from this agent.",
+            "ja": "このエージェントへのアクセスがブロックされています。",
+            "ru": "Вам заблокирован доступ к этому агенту.",
+            "pt-BR": "Você foi bloqueado deste agente.",
+            "id": "Anda telah diblokir dari agen ini.",
+        },
+        "pending": {
+            "zh": "您目前没有访问此智能体的权限，需要审批。\n" "ID: {sender_id}",
+            "en": "You do not have access to this agent. "
+            "Approval required.\nID: {sender_id}",
+            "ja": "このエージェントへのアクセス権がありません。" "承認が必要です。\nID: {sender_id}",
+            "ru": "У вас нет доступа к этому агенту. "
+            "Требуется одобрение.\nID: {sender_id}",
+            "pt-BR": "Você não tem acesso a este agente. "
+            "Aprovação necessária.\nID: {sender_id}",
+            "id": "Anda tidak memiliki akses ke agen ini. "
+            "Persetujuan diperlukan.\nID: {sender_id}",
+        },
+    }
+
+    _ACL_LANG_FALLBACK = {"zh", "en", "ja", "ru", "pt-BR", "id"}
+
+    def _acl_msg(self, key: str, **kwargs: str) -> str:
+        """Return an access-control message in the agent's language."""
+        lang = self._language
+        if lang not in self._ACL_LANG_FALLBACK:
+            lang = "zh" if lang.startswith("zh") else "en"
+        template = self._ACL_I18N[key][lang]
+        return template.format(**kwargs) if kwargs else template
+
+    @property
+    def access_control_enabled(self) -> bool:
+        """True if access control is active for any chat type."""
+        return self.access_control_dm or self.access_control_group
+
+    async def _access_control_gate(self, payload: Any) -> bool:
+        """Check access control. Returns True if blocked."""
+        if not self.access_control_enabled:
+            return False
+
+        # Prefer acl_sender_id (real sender, unaffected by shared session)
+        if isinstance(payload, dict):
+            sender_id = (
+                payload.get("acl_sender_id") or payload.get("sender_id") or ""
             )
-        return False, (
-            "Sorry, you are not authorized to use this bot. "
-            "Please contact the administrator to add your ID "
-            f"to the allowlist. Your ID: {sender_id}"
+            meta = dict(payload.get("meta") or {})
+        else:
+            sender_id = (
+                getattr(payload, "acl_sender_id", "")
+                or getattr(payload, "user_id", "")
+                or ""
+            )
+            meta = dict(getattr(payload, "channel_meta", None) or {})
+
+        if not sender_id:
+            return False
+
+        # Skip if access control not enabled for this chat type
+        is_group = meta.get("is_group", False)
+        if is_group and not self.access_control_group:
+            return False
+        if not is_group and not self.access_control_dm:
+            return False
+
+        store = self._get_acl_store()
+        channel_key = self.channel
+
+        # ── Whitelist / blacklist / pending decision ────────────────────
+        if store.is_whitelisted(channel_key, sender_id):
+            return False  # allowed
+
+        if store.is_blacklisted(channel_key, sender_id):
+            deny_msg = self._acl_msg("blocked")
+        else:
+            first_message = self._extract_query_from_payload(payload)
+            store.add_pending(channel_key, sender_id, first_message)
+            deny_msg = self._acl_msg("pending", sender_id=sender_id)
+
+        # ── Send deny message back via the channel's own send() ─────────
+        try:
+            if isinstance(payload, dict):
+                to_handle = sender_id
+            else:
+                to_handle = self.get_to_handle_from_request(payload)
+            await self.send_content_parts(
+                to_handle,
+                [TextContent(type=ContentType.TEXT, text=deny_msg)],
+                meta,
+            )
+        except Exception:
+            logger.debug(
+                "%s access control: failed to send deny to %s",
+                self.channel,
+                sender_id[:20] if sender_id else "?",
+            )
+
+        logger.info(
+            "%s access control blocked: sender=%s",
+            self.channel,
+            sender_id,
         )
+        return True
 
     def _check_group_mention(
         self,
@@ -347,6 +448,15 @@ class BaseChannel(ABC):
         return bool(
             meta.get("bot_mentioned") or meta.get("has_bot_command"),
         )
+
+    def _get_acl_store(self):
+        """Get the AccessControlStore for this channel's workspace."""
+        from pathlib import Path
+
+        workspace_dir = None
+        if self._workspace is not None:
+            workspace_dir = Path(self._workspace.workspace_dir)
+        return get_access_control_store(workspace_dir)
 
     def set_enqueue(self, cb: EnqueueCallback) -> None:
         """Set enqueue callback (called by ChannelManager)."""
@@ -460,20 +570,172 @@ class BaseChannel(ABC):
                 f"This should not happen with UnifiedQueueManager.",
             )
 
+    _STREAMABLE_TYPES = {"reasoning", "message"}
+
+    def _resolve_stream_type(self, event: Any) -> str:
+        """Map event.type to a stream_type string.
+
+        Returns ``"reasoning"`` or ``"message"`` for streamable text,
+        or the raw type string (e.g. ``"plugin_call"``) otherwise.
+        """
+        msg_type = getattr(event, "type", None)
+        if msg_type is None:
+            return "message"
+        type_str = (
+            msg_type.value if hasattr(msg_type, "value") else str(msg_type)
+        )
+        return type_str
+
+    async def _dispatch_streaming_event(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        """Dispatch streaming hooks for reasoning / message events.
+
+        Returns *True* if the event was consumed by the streaming
+        path (so the caller should skip ``on_event_message_completed``).
+        Non-streamable types (e.g. ``plugin_call``) return *False*,
+        falling through to the normal non-streaming path.
+        """
+        obj = getattr(event, "object", None)
+        status = getattr(event, "status", None)
+
+        if obj == "message" and status == RunStatus.InProgress:
+            return await self._on_stream_msg_start(
+                request,
+                to_handle,
+                event,
+                send_meta,
+                msg_id_to_stream_type,
+                streaming_buffers,
+            )
+        if obj == "content" and status == RunStatus.InProgress:
+            return await self._on_stream_content_delta(
+                request,
+                to_handle,
+                event,
+                send_meta,
+                msg_id_to_stream_type,
+                streaming_buffers,
+            )
+        if obj == "message" and status == RunStatus.Completed:
+            return await self._on_stream_msg_end(
+                request,
+                to_handle,
+                event,
+                send_meta,
+                msg_id_to_stream_type,
+                streaming_buffers,
+            )
+        return False
+
+    async def _on_stream_msg_start(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        stream_type = self._resolve_stream_type(event)
+        if stream_type not in self._STREAMABLE_TYPES:
+            return False
+        msg_id = getattr(event, "id", None)
+        if msg_id:
+            msg_id_to_stream_type[msg_id] = stream_type
+        if stream_type == "reasoning" and self._filter_thinking:
+            return True
+        streaming_buffers[stream_type] = ""
+        await self.on_streaming_start(
+            request,
+            to_handle,
+            event,
+            send_meta,
+            stream_type,
+            accumulated_text="",
+        )
+        return True
+
+    async def _on_stream_content_delta(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        if not getattr(event, "delta", False):
+            return False
+        content_msg_id = getattr(event, "msg_id", None) or ""
+        stream_type = msg_id_to_stream_type.get(
+            content_msg_id,
+            "",
+        )
+        if not stream_type or stream_type not in self._STREAMABLE_TYPES:
+            return False
+        if stream_type not in streaming_buffers:
+            return False
+        if stream_type == "reasoning" and self._filter_thinking:
+            return True
+        delta_text = getattr(event, "text", "") or ""
+        streaming_buffers[stream_type] = (
+            streaming_buffers.get(stream_type, "") + delta_text
+        )
+        await self.on_streaming_delta(
+            request,
+            to_handle,
+            event,
+            send_meta,
+            stream_type,
+            accumulated_text=streaming_buffers[stream_type],
+        )
+        return True
+
+    async def _on_stream_msg_end(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        stream_type = self._resolve_stream_type(event)
+        msg_id = getattr(event, "id", None)
+        if msg_id:
+            msg_id_to_stream_type.pop(msg_id, None)
+        if stream_type not in self._STREAMABLE_TYPES:
+            return False
+        if stream_type in streaming_buffers:
+            if stream_type == "reasoning" and self._filter_thinking:
+                streaming_buffers.pop(stream_type, None)
+                return True
+            accumulated = streaming_buffers.pop(stream_type, "")
+            await self.on_streaming_end(
+                request,
+                to_handle,
+                event,
+                send_meta,
+                stream_type,
+                accumulated_text=accumulated,
+            )
+        return True
+
     async def _stream_with_tracker(
         self,
         payload: Any,
     ) -> AsyncGenerator[str, None]:
-        """Stream events through TaskTracker for task tracking.
+        """Stream events via TaskTracker, yielding SSE strings.
 
-        This method wraps _process and yields SSE-formatted events.
-        Called by TaskTracker.attach_or_start to enable task cancellation.
-
-        Args:
-            payload: Message payload (dict or AgentRequest)
-
-        Yields:
-            SSE-formatted event strings
+        When ``streaming_enabled``, streaming hooks are invoked for
+        reasoning / message events alongside the normal path.
         """
         request = self._payload_to_request(payload)
 
@@ -498,21 +760,33 @@ class BaseChannel(ABC):
 
         last_response = None
         process_iterator = None
+        msg_id_to_stream_type: Dict[str, str] = {}
+        streaming_buffers: Dict[str, str] = {}
         try:
             process_iterator = self._process(request)
             async for event in process_iterator:
-                if hasattr(event, "model_dump_json"):
-                    data = event.model_dump_json()
-                elif hasattr(event, "json"):
-                    data = event.json()
-                else:
-                    data = json.dumps({"text": str(event)})
+                data = self._serialize_event_for_sse(event)
 
                 yield f"data: {data}\n\n"
 
                 obj = getattr(event, "object", None)
                 status = getattr(event, "status", None)
 
+                # --- streaming path ---
+                handled_by_streaming = False
+                if self.streaming_enabled:
+                    handled_by_streaming = (
+                        await self._dispatch_streaming_event(
+                            request,
+                            to_handle,
+                            event,
+                            send_meta,
+                            msg_id_to_stream_type,
+                            streaming_buffers,
+                        )
+                    )
+
+                # --- non-streaming / fallback path ---
                 if obj == "content":
                     if await self.on_event_content(
                         request,
@@ -522,12 +796,13 @@ class BaseChannel(ABC):
                     ):
                         continue
                 if obj == "message" and status == RunStatus.Completed:
-                    await self.on_event_message_completed(
-                        request,
-                        to_handle,
-                        event,
-                        send_meta,
-                    )
+                    if not handled_by_streaming:
+                        await self.on_event_message_completed(
+                            request,
+                            to_handle,
+                            event,
+                            send_meta,
+                        )
                 elif obj == "response":
                     last_response = event
                     await self.on_event_response(request, event)
@@ -571,6 +846,73 @@ class BaseChannel(ABC):
                 "Internal error",
             )
             raise
+
+    @staticmethod
+    def _sanitize_surrogate_text(text: str) -> str:
+        try:
+            text.encode("utf-8")
+            return text
+        except UnicodeEncodeError:
+            return text.encode("utf-8", errors="replace").decode(
+                "utf-8",
+                errors="replace",
+            )
+
+    @classmethod
+    def _sanitize_for_json(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return cls._sanitize_surrogate_text(value)
+        if isinstance(value, list):
+            return [cls._sanitize_for_json(v) for v in value]
+        if isinstance(value, dict):
+            out: Dict[Any, Any] = {}
+            for k, v in value.items():
+                nk = (
+                    cls._sanitize_surrogate_text(k)
+                    if isinstance(k, str)
+                    else k
+                )
+                out[nk] = cls._sanitize_for_json(v)
+            return out
+        return value
+
+    def _serialize_event_for_sse(self, event: Any) -> str:
+        try:
+            if hasattr(event, "model_dump_json"):
+                data = event.model_dump_json()
+            elif hasattr(event, "json"):
+                data = event.json()
+            else:
+                data = json.dumps({"text": str(event)}, ensure_ascii=True)
+
+            return self._sanitize_surrogate_text(data)
+
+        except Exception as err:
+            logger.warning(
+                "Event JSON serialization failed; using safe fallback: %s",
+                err,
+            )
+            try:
+                if hasattr(event, "model_dump"):
+                    payload = event.model_dump(mode="python")
+                elif hasattr(event, "dict"):
+                    payload = event.dict()
+                else:
+                    payload = {"text": str(event)}
+
+                payload = self._sanitize_for_json(payload)
+                return json.dumps(payload, ensure_ascii=True, default=str)
+            except Exception as fallback_err:
+                logger.error(
+                    "Fallback event serialization failed: %s",
+                    fallback_err,
+                )
+                return json.dumps(
+                    {
+                        "text": self._sanitize_surrogate_text(str(event)),
+                    },
+                    ensure_ascii=True,
+                )
 
     @classmethod
     def from_env(
@@ -811,6 +1153,10 @@ class BaseChannel(ABC):
         if not self._debounce_payload(payload):
             return
 
+        # ── Unified access control gate ─────────────────────────────────
+        if await self._access_control_gate(payload):
+            return
+
         if self._workspace is not None and self._command_registry is not None:
             query_text = self._extract_query_from_payload(payload)
             logger.debug(
@@ -974,6 +1320,57 @@ class BaseChannel(ABC):
             send_meta,
         )
         return True
+
+    # ------------------------------------------------------------------
+    # Streaming hooks — override in subclasses
+    # ------------------------------------------------------------------
+
+    async def on_streaming_start(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        stream_type: str,
+        accumulated_text: str = "",
+    ) -> None:
+        """Called when a new streaming segment begins.
+
+        *stream_type* is ``"reasoning"`` or ``"message"``.
+        ``accumulated_text`` is always ``""`` at this point.
+        """
+
+    async def on_streaming_delta(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        stream_type: str,
+        accumulated_text: str = "",
+    ) -> None:
+        """Called for each incremental text chunk.
+
+        ``accumulated_text`` contains all text received so far
+        for this *stream_type*, including the current delta.
+        Useful for channels that overwrite the message bubble
+        with full text on each update (e.g. WeCom).
+        """
+
+    async def on_streaming_end(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        stream_type: str,
+        accumulated_text: str = "",
+    ) -> None:
+        """Called when a streaming segment completes.
+
+        ``accumulated_text`` is the final full text for this
+        *stream_type*.
+        """
 
     async def on_event_message_completed(
         self,

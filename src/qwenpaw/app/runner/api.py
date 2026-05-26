@@ -162,6 +162,7 @@ async def get_chat(
     state = await session.get_session_state_dict(
         chat_spec.session_id,
         chat_spec.user_id,
+        chat_spec.channel,
     )
     status = await workspace.task_tracker.get_status(chat_id)
     if not state:
@@ -170,7 +171,7 @@ async def get_chat(
     memory = InMemoryMemory()
     memory.load_state_dict(memory_state, strict=False)
 
-    memories = await memory.get_memory(prepend_summary=False)
+    memories = await memory.get_memory(prepend_summary=True)
     messages = agentscope_msg_to_message(memories)
     return ChatHistory(messages=messages, status=status)
 

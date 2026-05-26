@@ -13,6 +13,7 @@ from agentscope.message import TextBlock
 from agentscope.tool import ToolResponse
 
 from ...config.utils import read_last_api
+from ...utils.http import trust_env_for_url
 
 
 DEFAULT_AGENT_API_BASE_URL = "http://127.0.0.1:8088"
@@ -65,9 +66,11 @@ def create_agent_api_client(
     default_timeout: float = DEFAULT_AGENT_API_TIMEOUT,
 ) -> httpx.Client:
     """Create an HTTP client targeting the local agent API."""
+    normalized = _normalize_api_base_url(base_url)
     return httpx.Client(
-        base_url=_normalize_api_base_url(base_url),
+        base_url=normalized,
         timeout=default_timeout,
+        trust_env=trust_env_for_url(normalized),
     )
 
 
@@ -220,6 +223,9 @@ def build_agent_chat_request(
                 "content": [{"type": "text", "text": final_text}],
             },
         ],
+        "request_context": {
+            "root_agent_id": caller_agent_id,
+        },
     }
 
     # Add root_session_id as top-level field for approval routing
@@ -302,12 +308,16 @@ def submit_agent_chat_task(
     request_payload: Dict[str, Any],
     to_agent: str,
     timeout: int,
+    task_timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Submit an inter-agent chat task for background execution."""
+    payload = dict(request_payload)
+    if task_timeout is not None:
+        payload["timeout"] = task_timeout
     with create_agent_api_client(base_url) as client:
         response = client.post(
             "/agent/process/task",
-            json=request_payload,
+            json=payload,
             headers=_request_headers(to_agent),
             timeout=timeout,
         )
@@ -510,6 +520,7 @@ async def submit_to_agent(
     to_agent: str,
     text: str,
     session_id: Optional[str] = None,
+    task_timeout: Optional[float] = None,
 ) -> ToolResponse:
     """Submit a background message to another configured agent.
 
@@ -526,6 +537,9 @@ async def submit_to_agent(
         session_id (`str`, optional):
             Existing session ID to continue a previous conversation in the
             background. If not provided, a new session ID is generated.
+        task_timeout (`float`, optional):
+            Task execution timeout in seconds. Overrides the server-side
+            default stream_task_timeout for this specific task.
 
     Returns:
         `ToolResponse`:
@@ -578,6 +592,7 @@ async def submit_to_agent(
         request_payload,
         normalized_to_agent,
         int(DEFAULT_AGENT_API_TIMEOUT),
+        task_timeout,
     )
     return _tool_text_response(
         format_background_submission_text(result, final_session_id),

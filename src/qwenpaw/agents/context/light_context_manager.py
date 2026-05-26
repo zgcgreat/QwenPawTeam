@@ -30,7 +30,7 @@ from ..model_factory import create_model_and_formatter
 from ..tools.utils import truncate_text_output, DEFAULT_MAX_BYTES
 from ..utils import get_token_counter
 from ..utils.estimate_token_counter import EstimatedTokenCounter
-from ...config.config import load_agent_config
+from ...config.config import load_agent_config, get_model_max_input_length
 from ...constant import TRUNCATION_NOTICE_MARKER
 
 if TYPE_CHECKING:
@@ -620,6 +620,7 @@ class LightContextManager(BaseContextManager):
         agent_config = load_agent_config(self.agent_id)
         running_config = agent_config.running
         ccc = running_config.light_context_config.context_compact_config
+        max_input_length = get_model_max_input_length(agent_config)
 
         model, formatter = create_model_and_formatter(self.agent_id)
 
@@ -631,7 +632,7 @@ class LightContextManager(BaseContextManager):
             as_llm_formatter=formatter,
             as_token_counter=get_token_counter(agent_config),
             language=agent_config.language,
-            max_input_length=running_config.max_input_length,
+            max_input_length=max_input_length,
             compact_ratio=ccc.compact_threshold_ratio,
             add_thinking_block=ccc.compact_with_thinking_block,
         )
@@ -682,19 +683,15 @@ class LightContextManager(BaseContextManager):
         if command_handler is not None and command_handler.is_command(query):
             return None
 
-        agent_config = load_agent_config(self.agent_id)
-        rlmc = agent_config.running.reme_light_memory_config
-        ms = rlmc.auto_memory_search_config
-
-        if not ms.enabled:
-            return None
-
         memory_manager = agent.memory_manager
         if memory_manager is None:
             return None
 
         try:
-            result = await memory_manager.retrieve(msg, agent_name=agent.name)
+            result = await memory_manager.auto_memory_search(
+                msg,
+                agent_name=agent.name,
+            )
         except BaseException as e:
             logger.warning(
                 "memory_manager.retrieve failed, skipping e=%s",
@@ -727,6 +724,7 @@ class LightContextManager(BaseContextManager):
             agent_config = load_agent_config(self.agent_id)
             running_config = agent_config.running
             token_counter = get_token_counter(agent_config)
+            max_input_length = get_model_max_input_length(agent_config)
 
             memory = agent.memory
             system_prompt = agent.sys_prompt
@@ -743,10 +741,10 @@ class LightContextManager(BaseContextManager):
 
             ccc = running_config.light_context_config.context_compact_config
             context_compact_threshold = int(
-                running_config.max_input_length * ccc.compact_threshold_ratio,
+                max_input_length * ccc.compact_threshold_ratio,
             )
             context_compact_reserve = int(
-                running_config.max_input_length * ccc.reserve_threshold_ratio,
+                max_input_length * ccc.reserve_threshold_ratio,
             )
             left_compact_threshold = (
                 context_compact_threshold - str_token_count
@@ -781,7 +779,7 @@ class LightContextManager(BaseContextManager):
                 return None
 
             # Build context status info for printing
-            max_len = running_config.max_input_length
+            max_len = max_input_length
             total_msgs = len(messages)
             compact_count = len(messages_to_compact)
             keep_count = len(messages_to_keep)
@@ -810,7 +808,7 @@ class LightContextManager(BaseContextManager):
                     as_llm_formatter=agent.formatter,
                     as_token_counter=token_counter,
                     language=agent_config.language,
-                    max_input_length=running_config.max_input_length,
+                    max_input_length=max_input_length,
                     compact_ratio=ccc.compact_threshold_ratio,
                     add_thinking_block=ccc.compact_with_thinking_block,
                 )
@@ -924,9 +922,8 @@ class LightContextManager(BaseContextManager):
             )
             logger.info(f"Marked {updated_count} messages as compacted")
 
-            rlmc = running_config.reme_light_memory_config
-            if messages_to_compact and rlmc.summarize_when_compact:
-                memory_manager.add_summarize_task(
+            if messages_to_compact:
+                await memory_manager.summarize_when_compact(
                     messages=messages_to_compact,
                 )
 
@@ -989,33 +986,13 @@ class LightContextManager(BaseContextManager):
             if memory_manager is None:
                 return None
 
-            agent_config = load_agent_config(self.agent_id)
-            rlmc = agent_config.running.reme_light_memory_config
-            auto_memory_interval = rlmc.auto_memory_interval
-
-            if auto_memory_interval is None or auto_memory_interval <= 0:
-                return None
-
             memory = agent.memory
-            # memory.content is list[tuple[Msg, marks]]
-            # Find indices of user messages to locate recent interval
-            user_msg_indices = [
-                i
-                for i, (msg, _) in enumerate(memory.content)
-                if msg.role == "user"
-            ]
+            all_messages = [msg for msg, _ in memory.content]
 
-            if (
-                len(user_msg_indices) >= auto_memory_interval
-                and len(user_msg_indices) % auto_memory_interval == 0
-            ):
-                # Get messages from the start of recent interval
-                start_index = user_msg_indices[-auto_memory_interval]
-                recent_messages = [
-                    msg for msg, _ in memory.content[start_index:]
-                ]
-                if recent_messages:
-                    memory_manager.add_summarize_task(messages=recent_messages)
+            if all_messages:
+                await memory_manager.auto_memory(
+                    all_messages=all_messages,
+                )
         except Exception as e:
             logger.warning("post_reply hook failed: %s", e)
 

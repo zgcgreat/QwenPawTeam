@@ -8,19 +8,25 @@ import ConsolePollService from "../../components/ConsolePollService";
 import { ChunkErrorBoundary } from "../../components/ChunkErrorBoundary";
 import { lazyImportWithRetry } from "../../utils/lazyWithRetry";
 import { usePlugins } from "../../plugins/PluginContext";
+import { useCodingMode } from "../../stores/codingModeStore";
+import { useSyncCodingMode } from "../../stores/useSyncCodingMode";
 import styles from "../index.module.less";
 
 // Chat is eagerly loaded (default landing page)
 import Chat from "../../pages/Chat";
+// Coding Mode IDE page
+import CodingPage from "../../pages/Coding";
 
 // All other pages are lazily loaded with automatic retry on chunk failure
 const ChannelsPage = lazyImportWithRetry("../../pages/Control/Channels");
 const SessionsPage = lazyImportWithRetry("../../pages/Control/Sessions");
+const InboxPage = lazyImportWithRetry("../../pages/Inbox");
 const CronJobsPage = lazyImportWithRetry("../../pages/Control/CronJobs");
 const HeartbeatPage = lazyImportWithRetry("../../pages/Control/Heartbeat");
 const AgentConfigPage = lazyImportWithRetry("../../pages/Agent/Config");
 const SkillsPage = lazyImportWithRetry("../../pages/Agent/Skills");
 const SkillPoolPage = lazyImportWithRetry("../../pages/Settings/SkillPool");
+const MarketPage = lazyImportWithRetry("../../pages/Settings/Market");
 const ToolsPage = lazyImportWithRetry("../../pages/Agent/Tools");
 const WorkspacePage = lazyImportWithRetry("../../pages/Agent/Workspace");
 const MCPPage = lazyImportWithRetry("../../pages/Agent/MCP");
@@ -38,17 +44,41 @@ const VoiceTranscriptionPage = lazyImportWithRetry(
 const AgentsPage = lazyImportWithRetry("../../pages/Settings/Agents");
 const DebugPage = lazyImportWithRetry("../../pages/Settings/Debug");
 const BackupsPage = lazyImportWithRetry("../../pages/Settings/Backups");
+const PluginManagerPage = lazyImportWithRetry(
+  "../../pages/Settings/PluginManager",
+);
 
 const { Content } = Layout;
 
+// Route "/" lands here. Waits for useSyncCodingMode to populate the store
+// from the backend before deciding where to send the user — otherwise we
+// would flash /chat first and the toggle button would desync with the
+// rendered page.
+function DefaultRedirect() {
+  const { t } = useTranslation();
+  const { codingMode, initialized } = useCodingMode();
+  if (!initialized) {
+    return (
+      <Spin
+        tip={t("common.loading")}
+        style={{ display: "block", margin: "20vh auto" }}
+      />
+    );
+  }
+  return <Navigate to={codingMode ? "/coding" : "/chat"} replace />;
+}
+
 const pathToKey: Record<string, string> = {
   "/chat": "chat",
+  "/coding": "chat",
   "/channels": "channels",
   "/sessions": "sessions",
+  "/inbox": "inbox",
   "/cron-jobs": "cron-jobs",
   "/heartbeat": "heartbeat",
   "/skills": "skills",
   "/skill-pool": "skill-pool",
+  "/market": "market",
   "/tools": "tools",
   "/mcp": "mcp",
   "/acp": "acp",
@@ -63,6 +93,7 @@ const pathToKey: Record<string, string> = {
   "/voice-transcription": "voice-transcription",
   "/debug": "debug",
   "/backups": "backups",
+  "/plugin-manager": "plugin-manager",
 };
 
 export default function MainLayout() {
@@ -70,6 +101,10 @@ export default function MainLayout() {
   const location = useLocation();
   const currentPath = location.pathname;
   const { pluginRoutes } = usePlugins();
+
+  // Backend is the source of truth for Coding Mode state — refill the
+  // in-memory store every time the selected agent changes.
+  useSyncCodingMode();
 
   // Resolve selected key: check static routes first, then plugin routes
   let selectedKey = pathToKey[currentPath] || "";
@@ -100,14 +135,17 @@ export default function MainLayout() {
                 }
               >
                 <Routes>
-                  <Route path="/" element={<Navigate to="/chat" replace />} />
+                  <Route path="/" element={<DefaultRedirect />} />
                   <Route path="/chat/*" element={<Chat />} />
+                  <Route path="/coding" element={<CodingPage />} />
                   <Route path="/channels" element={<ChannelsPage />} />
                   <Route path="/sessions" element={<SessionsPage />} />
+                  <Route path="/inbox" element={<InboxPage />} />
                   <Route path="/cron-jobs" element={<CronJobsPage />} />
                   <Route path="/heartbeat" element={<HeartbeatPage />} />
                   <Route path="/skills" element={<SkillsPage />} />
                   <Route path="/skill-pool" element={<SkillPoolPage />} />
+                  <Route path="/market" element={<MarketPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/mcp" element={<MCPPage />} />
                   <Route path="/acp" element={<ACPPage />} />
@@ -126,6 +164,10 @@ export default function MainLayout() {
                   />
                   <Route path="/debug" element={<DebugPage />} />
                   <Route path="/backups" element={<BackupsPage />} />
+                  <Route
+                    path="/plugin-manager"
+                    element={<PluginManagerPage />}
+                  />
 
                   {/* Plugin routes — dynamically injected at runtime */}
                   {pluginRoutes.map((route) => (
