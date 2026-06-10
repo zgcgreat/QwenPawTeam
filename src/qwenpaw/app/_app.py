@@ -699,6 +699,42 @@ def get_doctor_runtime():
 
 app.include_router(api_router, prefix="/api")
 
+# ── Multi-user: replace upstream auth routes with plugin routes ────
+# When multi-user is enabled, the plugin's router_extension registers
+# its own /auth/* endpoints (auto-register on login, dynamic fields,
+# etc.) via register_http_router.  However, the upstream auth router
+# was already included in api_router above, so both sets of /auth/*
+# routes exist — and FastAPI matches the upstream ones first (they
+# were registered earlier).
+#
+# The correct fix is: when multi-user is active, remove the upstream
+# auth routes so the plugin's routes take effect.  We do this by
+# deleting routes whose path starts with "/api/auth/" from the app's
+# route list, then letting the plugin re-add its own versions later
+# during _background_startup().
+if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+):
+    _routes = app.router.routes
+    _auth_prefix = "/api/auth/"
+    # Collect indices of upstream auth routes to remove (iterate
+    # backwards to avoid index shifting during deletion).
+    _to_remove = [
+        i for i, r in enumerate(_routes)
+        if hasattr(r, "path") and r.path.startswith(_auth_prefix)
+    ]
+    for _i in reversed(_to_remove):
+        _routes.pop(_i)
+    if _to_remove:
+        logger.debug(
+            "Removed %d upstream auth route(s) for multi-user plugin override",
+            len(_to_remove),
+        )
+    # Invalidate cached OpenAPI schema
+    app.openapi_schema = None
+
 # Approval router: /api/approval/approve, /api/approval/deny, etc.
 app.include_router(approval_router, prefix="/api")
 
