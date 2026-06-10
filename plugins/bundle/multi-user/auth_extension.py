@@ -132,6 +132,9 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
 # Token generation / verification (HMAC-SHA256, no PyJWT needed)
 # ===================================================================
 
+# Maximum token validity: 100 years (for "permanent" tokens)
+TOKEN_EXPIRY_MAX = 100 * 365 * 24 * 3600
+
 
 def _get_jwt_secret() -> str:
     """Return the signing secret, creating one if absent."""
@@ -144,13 +147,34 @@ def _get_jwt_secret() -> str:
     return secret
 
 
-def create_token(user_id: str) -> str:
-    """Create an HMAC-signed token: ``base64(payload).signature``."""
+def create_token(user_id: str, expiry_seconds: Optional[int] = None) -> str:
+    """Create an HMAC-signed token: ``base64(payload).signature``.
+
+    Args:
+        user_id: The user identifier to encode in the token.
+        expiry_seconds: Token validity in seconds.
+            ``None`` → default (TOKEN_EXPIRY_SECONDS = 7 days).
+            ``<= 0`` → permanent (100 years).
+    """
     import base64
 
+    if expiry_seconds is None:
+        actual_expiry = TOKEN_EXPIRY_SECONDS
+    elif expiry_seconds <= 0:
+        actual_expiry = TOKEN_EXPIRY_MAX
+    else:
+        actual_expiry = min(expiry_seconds, TOKEN_EXPIRY_MAX)
+
     secret = _get_jwt_secret()
+    # Generate unique token ID (jti) for revocation support
+    token_id = secrets.token_hex(16)
     payload = json.dumps(
-        {"sub": user_id, "exp": int(time.time()) + TOKEN_EXPIRY_SECONDS, "iat": int(time.time())}
+        {
+            "sub": user_id,
+            "exp": int(time.time()) + actual_expiry,
+            "iat": int(time.time()),
+            "jti": token_id,  # JWT ID for individual revocation
+        }
     )
     payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
     sig = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
@@ -158,7 +182,10 @@ def create_token(user_id: str) -> str:
 
 
 def verify_token(token: str) -> Optional[str]:
-    """Verify token, return user_id if valid, else None."""
+    """Verify token, return user_id if valid, else None.
+
+    Also checks if the token has been revoked (appears in the revocation list).
+    """
     import base64
 
     try:
@@ -173,6 +200,12 @@ def verify_token(token: str) -> Optional[str]:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         if payload.get("exp", 0) < time.time():
             return None
+
+        # Check if token is revoked
+        jti = payload.get("jti")
+        if jti and _is_token_revoked(jti):
+            return None
+
         return payload.get("sub")
     except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
         logger.debug("Token verification failed: %s", exc)
@@ -254,6 +287,141 @@ def _save_auth_data(data: dict) -> None:
         os.chmod(AUTH_FILE, 0o600)
     except OSError:
         pass
+
+
+# ===================================================================
+# Token revocation (blacklist management)
+# ===================================================================
+
+
+def _is_token_revoked(jti: str) -> bool:
+    """Check if a token ID (jti) is in the revocation list.
+
+    Uses O(1) dict lookup via revoked_tokens_meta for performance.
+    """
+    data = _load_auth_data()
+    meta = data.get("revoked_tokens_meta", {})
+    return jti in meta
+
+
+def _add_to_revocation_list(jti: str, exp: int) -> None:
+    """Add a token ID to the revocation list with its expiry time.
+
+    Uses revoked_tokens_meta dict for O(1) lookups. The revoked_tokens list
+    is kept for backwards compatibility but not used for membership checks.
+    """
+    data = _load_auth_data()
+    if data.get("_auth_load_error"):
+        return
+
+    # Initialize revoked_tokens_meta if not present
+    if "revoked_tokens_meta" not in data:
+        data["revoked_tokens_meta"] = {}
+
+    # O(1) check using dict
+    if jti not in data["revoked_tokens_meta"]:
+        data["revoked_tokens_meta"][jti] = exp
+
+        # Also add to list for backwards compatibility
+        if "revoked_tokens" not in data:
+            data["revoked_tokens"] = []
+        data["revoked_tokens"].append(jti)
+
+    _save_auth_data(data)
+
+
+def _clean_expired_revocations() -> None:
+    """Remove expired tokens from the revocation list to prevent unbounded growth."""
+    data = _load_auth_data()
+    if data.get("_auth_load_error"):
+        return
+
+    revoked = data.get("revoked_tokens", [])
+    meta = data.get("revoked_tokens_meta", {})
+    current_time = int(time.time())
+
+    # Remove expired tokens
+    cleaned_revoked = []
+    cleaned_meta = {}
+
+    for jti in revoked:
+        exp = meta.get(jti, 0)
+        if exp > current_time:
+            cleaned_revoked.append(jti)
+            cleaned_meta[jti] = exp
+
+    if len(cleaned_revoked) < len(revoked):
+        data["revoked_tokens"] = cleaned_revoked
+        data["revoked_tokens_meta"] = cleaned_meta
+        _save_auth_data(data)
+        logger.info(
+            "Cleaned %d expired tokens from revocation list",
+            len(revoked) - len(cleaned_revoked),
+        )
+
+
+def revoke_token(token: str) -> bool:
+    """Revoke a single token by adding its jti to the blacklist.
+
+    Args:
+        token: The token string to revoke.
+
+    Returns True on success, False on failure.
+    """
+    import base64
+
+    try:
+        # Extract jti and exp from token
+        parts = token.split(".", 1)
+        if len(parts) != 2:
+            return False
+
+        payload_b64 = parts[0]
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        jti = payload.get("jti")
+        exp = payload.get("exp", 0)
+
+        if not jti:
+            logger.warning("Token has no jti, cannot revoke individually")
+            return False
+
+        _add_to_revocation_list(jti, exp)
+        logger.info("Token %s revoked", jti[:8])
+
+        # Clean up expired tokens periodically
+        _clean_expired_revocations()
+
+        return True
+    except Exception as exc:
+        logger.error("Failed to revoke token: %s", exc)
+        return False
+
+
+def revoke_all_tokens() -> bool:
+    """Revoke all existing tokens by rotating the JWT secret.
+
+    This will invalidate all tokens that were issued before this call.
+    Also clears the revocation list since all tokens are invalid anyway.
+    Returns True on success, False on failure.
+    """
+    try:
+        data = _load_auth_data()
+        if data.get("_auth_load_error"):
+            return False
+
+        # Rotate JWT secret to invalidate all existing tokens
+        data["jwt_secret"] = secrets.token_hex(32)
+
+        # Clear revocation list since all tokens are now invalid
+        data["revoked_tokens"] = []
+        data["revoked_tokens_meta"] = {}
+
+        _save_auth_data(data)
+        logger.info("All tokens revoked (JWT secret rotated)")
+        return True
+    except Exception as exc:
+        logger.error("Failed to revoke tokens: %s", exc)
+        return False
 
 
 # ===================================================================
@@ -357,17 +525,37 @@ def get_user_secret_dir(user_id: str) -> Path:
 # ===================================================================
 
 
-def register_user(password: str, **fields: str) -> Optional[str]:
+def register_user(
+    username_or_password: str,
+    password: Optional[str] = None,
+    expiry_seconds: Optional[int] = None,
+    **fields: str,
+) -> Optional[str]:
     """Register a new user account. Returns token on success.
 
-    Args:
-        password: The user's password.
-        **fields: Keyword arguments matching ``USER_FIELDS``.
-            Example: ``register_user(password="x", username="admin")``
+    Supports two calling conventions (same as :func:`authenticate`):
+
+    1. **Upstream convention** (positional args):
+       ``register_user(username, password, expiry_seconds)``
+       — called by ``qwenpaw.app.routers.auth``.
+
+    2. **Multi-user convention** (positional + keyword args):
+       ``register_user(password, **fields)``
+       — called by ``router_extension.py`` and ``auto_register_from_env``.
+       The first positional arg is the password, and user identity
+       fields are passed as keyword arguments.
 
     Returns:
         Token string on success, ``None`` if user already exists.
     """
+    if password is not None:
+        # Upstream convention: register_user(username, password, expiry_seconds)
+        fields = {USER_FIELDS[0]: username_or_password}
+        actual_password = password
+    else:
+        # Multi-user convention: register_user(password=password, **fields)
+        actual_password = username_or_password
+
     user_id = build_user_id(**fields)
     data = _load_auth_data()
     users = data.setdefault("users", {})
@@ -375,7 +563,7 @@ def register_user(password: str, **fields: str) -> Optional[str]:
     if user_id in users:
         return None
 
-    pw_hash, salt = _hash_password(password)
+    pw_hash, salt = _hash_password(actual_password)
     user_record = {
         "user_id": user_id,
         **{field: fields[field].strip() for field in USER_FIELDS},
@@ -433,16 +621,54 @@ def ensure_user_workspace(**fields: str) -> str:
     return user_id
 
 
-def authenticate(password: str, **fields: str) -> Optional[str]:
+def authenticate(
+    username_or_password: str,
+    password: Optional[str] = None,
+    expiry_seconds: Optional[int] = None,
+    **fields: str,
+) -> Optional[str]:
     """Authenticate with user fields + password. Returns token if valid.
 
+    Supports two calling conventions for compatibility:
+
+    1. **Upstream convention** (positional args):
+       ``authenticate(username, password, expiry_seconds)``
+       — used by ``qwenpaw.app.routers.auth`` which calls
+       ``authenticate(req.username, req.password, req.expires_in)``.
+       The first positional arg is mapped to ``USER_FIELDS[0]``.
+
+    2. **Multi-user convention** (positional + keyword args):
+       ``authenticate(password, **fields)``
+       — used by ``router_extension.py``'s login endpoint.
+       The first positional arg is the password, and user identity
+       fields are passed as keyword arguments.
+
     Args:
-        password: The user's password.
-        **fields: Keyword arguments matching ``USER_FIELDS``.
+        username_or_password: In upstream convention, the username
+            (mapped to ``USER_FIELDS[0]``); in multi-user convention,
+            the password (passed as first positional arg).
+        password: In upstream convention, the password; in multi-user
+            convention, omitted (password is the first positional arg).
+        expiry_seconds: Token expiry in seconds (upstream convention).
+        **fields: Keyword arguments matching ``USER_FIELDS``
+            (multi-user convention).
 
     Returns:
         Token string if authentication succeeds, ``None`` otherwise.
     """
+    # Detect calling convention:
+    # - If `password` is given as 2nd positional, it's upstream convention:
+    #   authenticate(username, password, expiry_seconds)
+    # - If `password` is None, the first arg IS the password (multi-user kw convention)
+    if password is not None:
+        # Upstream convention: authenticate(username, password, expiry_seconds)
+        # Map first arg to the primary USER_FIELD
+        fields = {USER_FIELDS[0]: username_or_password}
+        actual_password = password
+    else:
+        # Multi-user convention: authenticate(password=password, **fields)
+        actual_password = username_or_password
+
     user_id = build_user_id(**fields)
     data = _load_auth_data()
     users = data.get("users", {})
@@ -453,12 +679,12 @@ def authenticate(password: str, **fields: str) -> Optional[str]:
 
     stored_hash = user.get("password_hash", "")
     stored_salt = user.get("password_salt", "")
-    if stored_hash and stored_salt and verify_password(password, stored_hash, stored_salt):
+    if stored_hash and stored_salt and verify_password(actual_password, stored_hash, stored_salt):
         # Ensure user config exists (repair legacy registrations that
         # were created before config.json auto-generation was added).
         from config_extension import ensure_user_config_exists
         ensure_user_config_exists(user_id)
-        return create_token(user_id)
+        return create_token(user_id, expiry_seconds=expiry_seconds)
     return None
 
 
@@ -485,8 +711,29 @@ def get_user_info(user_id: str) -> Optional[Dict[str, str]]:
         return {"user_id": user_id, "username": user.get("username", "")}
 
 
-def update_credentials(user_id, current_password, new_password=None) -> Optional[str]:
-    """Update a user's password."""
+def update_credentials(
+    current_password: str,
+    new_username: Optional[str] = None,
+    new_password: Optional[str] = None,
+    expiry_seconds: Optional[int] = None,
+    user_id: Optional[str] = None,
+) -> Optional[str]:
+    """Update a user's credentials.
+
+    Supports upstream calling convention:
+    ``update_credentials(current_password=..., new_username=..., new_password=..., expiry_seconds=...)``
+
+    If ``user_id`` is not provided, the first user in the database is used
+    (backward-compatible with single-user upstream behavior).
+    """
+    if user_id is None:
+        # Fallback: find the first user (single-user compat)
+        data = _load_auth_data()
+        users = data.get("users", {})
+        if not users:
+            return None
+        user_id = next(iter(users))
+
     data = _load_auth_data()
     users = data.get("users", {})
     user = users.get(user_id)
@@ -498,15 +745,19 @@ def update_credentials(user_id, current_password, new_password=None) -> Optional
     if not verify_password(current_password, stored_hash, stored_salt):
         return None
 
+    if new_username and new_username.strip():
+        user[USER_FIELDS[0]] = new_username.strip()
+
     if new_password:
         pw_hash, salt = _hash_password(new_password)
-        users[user_id]["password_hash"] = pw_hash
-        users[user_id]["password_salt"] = salt
+        user["password_hash"] = pw_hash
+        user["password_salt"] = salt
         data["jwt_secret"] = secrets.token_hex(32)
 
+    users[user_id] = user
     data["users"] = users
     _save_auth_data(data)
-    return create_token(user_id)
+    return create_token(user_id, expiry_seconds=expiry_seconds)
 
 
 def delete_user(user_id: str, admin_user_id: str) -> bool:
@@ -553,7 +804,7 @@ def auto_register_from_env() -> None:
     if all(env_fields.values()) and env_password:
         user_id = build_user_id(**env_fields)
         if user_id not in list_users():
-            token = register_user(password=env_password, **env_fields)
+            token = register_user(env_password, **env_fields)
             if token:
                 logger.info("Auto-registered user from env vars: '%s'", user_id)
         return
@@ -714,6 +965,8 @@ def patch_auth_module() -> None:
     upstream_auth.build_user_id = build_user_id
     upstream_auth.parse_user_id = parse_user_id
     upstream_auth.auto_register_from_env = auto_register_from_env
+    upstream_auth.revoke_token = revoke_token
+    upstream_auth.revoke_all_tokens = revoke_all_tokens
     upstream_auth.USER_FIELDS = USER_FIELDS
     upstream_auth.PUBLIC_PATHS = PUBLIC_PATHS
     upstream_auth.PUBLIC_PREFIXES = PUBLIC_PREFIXES

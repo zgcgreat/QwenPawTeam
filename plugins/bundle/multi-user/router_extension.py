@@ -120,9 +120,9 @@ async def login(req: LoginRequest):
     for field in USER_FIELDS:
         stripped[field] = getattr(req, field).strip()
 
-    token = authenticate(password=req.password, **stripped)
+    token = authenticate(req.password, **stripped)
     if token is None:
-        token = register_user(password=req.password, **stripped)
+        token = register_user(req.password, **stripped)
         if token is None:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
