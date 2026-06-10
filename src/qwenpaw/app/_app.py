@@ -37,6 +37,30 @@ from ..utils.logging import (
 )
 from ..utils.system_info import summarize_python_environment
 from .auth import AuthMiddleware, auto_register_from_env
+
+# Multi-user early patch: patch AuthMiddleware BEFORE app.add_middleware()
+# so the middleware class reference points to the multi-user variant.
+# The multi-user plugin (plugins/bundle/multi-user/) is loaded later by
+# the PluginLoader during _background_startup(), but middleware is
+# registered at module level, so we must patch here.
+import os as _os
+if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+):
+    try:
+        from qwenpaw_plugins.multi_user.auth_extension import (
+            patch_auth_module,
+        )
+        patch_auth_module()
+        # Re-import to pick up the patched AuthMiddleware
+        from . import auth as _auth_reimport
+        AuthMiddleware = _auth_reimport.AuthMiddleware  # noqa: F811
+    except Exception:
+        # qwenpaw_plugins.multi_user not available (e.g. fresh install)
+        # — fall back to upstream AuthMiddleware.
+        pass
 from .routers import router as api_router, create_agent_scoped_router
 from .routers.agent_scoped import AgentContextMiddleware
 from .routers.approval import router as approval_router
@@ -272,19 +296,8 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
     logger.debug("Initializing MultiAgentManager...")
     multi_agent_manager = MultiAgentManager()
 
-    # Plugin lifespan hooks: allow plugins to wrap the manager
-    from qwenpaw_plugins import run_lifespan_hooks
-    multi_agent_manager = await run_lifespan_hooks(
-        "post_manager_init", app, multi_agent_manager,
-    )
-
     # --- Model provider manager (non-reloadable, in-memory) ---
     provider_manager = ProviderManager.get_instance()
-
-    # Plugin lifespan hooks: allow plugins to wrap the provider manager
-    provider_manager = await run_lifespan_hooks(
-        "post_provider_init", app, provider_manager,
-    )
 
     # --- Local model manager initialization ---
     local_model_manager = LocalModelManager.get_instance()
@@ -345,6 +358,8 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
 
             plugin_dirs = [
                 get_plugins_dir(),
+                # Bundled plugins shipped with the application source
+                Path(__file__).resolve().parent.parent.parent.parent / "plugins" / "bundle",
             ]
 
             plugin_loader = PluginLoader(plugin_dirs)
@@ -577,26 +592,10 @@ app = FastAPI(
     default_response_class=ORJSONResponse,
 )
 
-# === Plugin Activation ===
-# Plugins registered via qwenpaw_plugins are activated here.
-# This is the ONLY modification to upstream source code for plugin support.
-import os as _os
-from qwenpaw_plugins import run_lifespan_hooks  # noqa: F401 — used in lifespan above
-
-if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
-):
-    from qwenpaw_plugins.multi_user import activate_multi_user
-
-    activate_multi_user(app)
-
-    # Re-import AuthMiddleware after patch_auth_module() has replaced it.
-    from qwenpaw.app import auth as _auth_module_reimport
-
-    AuthMiddleware = _auth_module_reimport.AuthMiddleware  # noqa: F811
-
+# Multi-user plugin is now loaded via the upstream plugin system
+# (plugins/bundle/multi-user/plugin.json).  No manual activation
+# code needed here — the PluginLoader discovers and activates it
+# during _background_startup() via register_startup_hook().
 
 # Add agent context middleware for agent-scoped routes
 app.add_middleware(AgentContextMiddleware)

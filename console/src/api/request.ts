@@ -1,5 +1,6 @@
 import { getApiUrl, clearAuthToken } from "./config";
-// Multi-user plugin auth headers (gracefully degrades when disabled)
+// Multi-user: auth headers delegate to multi_user when enabled,
+// gracefully degrades to upstream behavior when disabled.
 import { buildAuthHeaders } from "../multi_user/authHeaders";
 
 function getErrorMessageFromBody(
@@ -90,11 +91,11 @@ export async function request<T = unknown>(
     headers,
   });
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        _handle401();
-        throw new Error("Not authenticated");
-      }
+  if (!response.ok) {
+    if (response.status === 401) {
+      _handle401();
+      throw new Error("Not authenticated");
+    }
 
     const text = await response.text().catch(() => "");
     const contentType = response.headers.get("content-type") || "";

@@ -1,0 +1,16 @@
+{
+  "id": "multi-user",
+  "name": "Multi-User",
+  "version": "1.0.0",
+  "description": "Multi-user support with isolated workspaces per user.",
+  "description_i18n": {
+    "zh-CN": "多用户支持：为每个用户提供隔离的工作空间。",
+    "en-US": "Multi-user support with isolated workspaces per user."
+  },
+  "author": "QwenPawTeam",
+  "entry": {
+    "backend": "plugin.py"
+  },
+  "min_version": "1.1.5",
+  "type": "hook"
+}

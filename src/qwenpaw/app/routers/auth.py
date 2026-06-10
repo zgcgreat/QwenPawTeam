@@ -29,6 +29,8 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
+    model_config = {"extra": "allow"}
+
     token: str
     username: str
 

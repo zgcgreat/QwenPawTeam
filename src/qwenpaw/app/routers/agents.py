@@ -29,6 +29,7 @@ from ...config.config import (
 )
 from ...config.utils import load_config, save_config
 from ...agents.memory.agent_md_manager import AgentMdManager
+from ..routers.workspace import MdFileInfo, MdFileContent
 from ...agents.utils import copy_workspace_md_files, normalize_agent_language
 from ...agents.skill_system import SkillPoolService, get_workspace_skills_dir
 from ..multi_agent_manager import MultiAgentManager

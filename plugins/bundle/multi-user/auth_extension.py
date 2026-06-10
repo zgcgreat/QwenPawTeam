@@ -33,7 +33,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from qwenpaw.constant import SECRET_DIR, WORKING_DIR
 
-from .constants import (
+from constants import (
     ENV_AUTH_ENABLED,
     PUBLIC_PATHS,
     PUBLIC_PREFIXES,
@@ -269,7 +269,7 @@ def is_auth_enabled() -> bool:
 
 def is_multi_user_enabled() -> bool:
     """Check whether multi-user mode is enabled."""
-    from .constants import ENV_MULTI_USER_ENABLED
+    from constants import ENV_MULTI_USER_ENABLED
 
     env_flag = os.environ.get(ENV_MULTI_USER_ENABLED, "true").strip().lower()
     if env_flag in ("true", "1", "yes"):
@@ -392,7 +392,7 @@ def register_user(password: str, **fields: str) -> Optional[str]:
 
     # Ensure user config.json exists so get_agent() can lazy-load
     # a user-specific Workspace instead of falling back to default.
-    from .config_extension import ensure_user_config_exists
+    from config_extension import ensure_user_config_exists
     ensure_user_config_exists(user_id)
 
     user_dir = get_user_working_dir(user_id)
@@ -423,7 +423,7 @@ def ensure_user_workspace(**fields: str) -> str:
         _save_auth_data(data)
 
         # Ensure user config.json exists so get_agent() can lazy-load
-        from .config_extension import ensure_user_config_exists
+        from config_extension import ensure_user_config_exists
         ensure_user_config_exists(user_id)
 
         logger.info("User workspace created (no-password): '%s'", user_id)
@@ -456,7 +456,7 @@ def authenticate(password: str, **fields: str) -> Optional[str]:
     if stored_hash and stored_salt and verify_password(password, stored_hash, stored_salt):
         # Ensure user config exists (repair legacy registrations that
         # were created before config.json auto-generation was added).
-        from .config_extension import ensure_user_config_exists
+        from config_extension import ensure_user_config_exists
         ensure_user_config_exists(user_id)
         return create_token(user_id)
     return None
@@ -541,7 +541,7 @@ def auto_register_from_env() -> None:
     if not is_auth_enabled():
         return
 
-    from .constants import ENV_AUTH_PASSWORD, ENV_AUTH_USERNAME
+    from constants import ENV_AUTH_PASSWORD, ENV_AUTH_USERNAME
 
     env_fields = {}
     for field in USER_FIELDS:
@@ -591,13 +591,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if is_multi_user_enabled():
                 token = self._extract_token(request)
                 if token:
-                    from .token_parser import parse_token_to_user_id
+                    from token_parser import parse_token_to_user_id
 
                     user_id = parse_token_to_user_id(token) or "default"
                     request.state.user = user_id
                     request.state.user_id = user_id
 
-                    from .user_context import set_current_user_id
+                    from user_context import set_current_user_id
 
                     set_current_user_id(user_id)
 
@@ -631,7 +631,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user = user_id
         request.state.user_id = user_id
 
-        from .user_context import set_current_user_id
+        from user_context import set_current_user_id
 
         set_current_user_id(user_id)
 
@@ -668,7 +668,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def _extract_token(request: Request) -> Optional[str]:
         """Extract Bearer token from header or query param."""
-        from .token_parser import extract_bearer_token
+        from token_parser import extract_bearer_token
 
         token = extract_bearer_token(request.headers.get("Authorization", ""))
         if token:
