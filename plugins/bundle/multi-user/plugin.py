@@ -75,10 +75,14 @@ class MultiUserPlugin:
             priority=200,
         )
 
-        # Register auth HTTP routes under /api prefix.
+        # Register auth HTTP routes.
+        # NOTE: The upstream register_http_router() automatically prepends
+        # "/api" to the prefix, so we only need to pass "/auth" here —
+        # the resulting mount point will be /api/auth, matching the upstream
+        # auth route layout.
         api.register_http_router(
             self._build_auth_router(),
-            prefix="/api",
+            prefix="/auth",
             tags=["auth"],
         )
 

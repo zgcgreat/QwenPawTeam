@@ -27,7 +27,7 @@ from constants import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["multi-user-auth"])
+router = APIRouter(tags=["multi-user-auth"])
 
 
 # ---------------------------------------------------------------------------
