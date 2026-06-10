@@ -2,9 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Form, Modal } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import api from "../../../api";
-import { agentsApi } from "../../../api/modules/agents";
 import type { AgentsRunningConfig } from "../../../api/types";
-import type { AgentProfileConfig } from "../../../api/types/agents";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import { useAgentStore } from "../../../stores/agentStore";
 import {
@@ -33,15 +31,13 @@ export function useAgentConfig() {
     setLoading(true);
     setError(null);
     try {
-      const [config, langResp, tzResp, agentProfile] = await Promise.all([
+      const [config, langResp, tzResp] = await Promise.all([
         api.getAgentRunningConfig(),
         api.getAgentLanguage(),
         api.getUserTimezone(),
-        agentsApi.getAgent(selectedAgent),
       ]);
-      agentProfileRef.current = agentProfile;
       const loadedLevel = (
-        agentProfile?.approval_level || "AUTO"
+        config.approval_level || "AUTO"
       ).toUpperCase() as ToolExecutionLevel;
       setApprovalLevel(loadedLevel);
       const contextBackend =
