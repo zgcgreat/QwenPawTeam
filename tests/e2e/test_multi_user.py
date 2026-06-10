@@ -79,11 +79,15 @@ _DEFAULT_FIELD_VALUES = {
 sys.path.insert(0, str(_SRC_DIR))
 
 # Force re-import to pick up fresh env vars
+_PLUGIN_DIR = str(_PROJECT_ROOT / "plugins" / "bundle" / "multi-user")
+if _PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, _PLUGIN_DIR)
+
 for m in list(sys.modules.keys()):
-    if m.startswith("qwenpaw_plugins.multi_user"):
+    if m.startswith(("auth_extension", "constants", "config_extension", "middleware", "manager_extension", "provider_extension")):
         del sys.modules[m]
 
-from qwenpaw_plugins.multi_user.constants import USER_FIELDS, USER_ID_SEPARATOR
+from constants import USER_FIELDS, USER_ID_SEPARATOR
 
 TEST_USER_FIELDS = {}
 for field in USER_FIELDS:
@@ -131,17 +135,16 @@ def _make_client(auth_enabled: bool = True):
     # Force re-import of all plugin / app modules so fresh env vars are read
     mod_names = [
         "qwenpaw.app._app",
-        "qwenpaw_plugins.multi_user",
-        "qwenpaw_plugins.multi_user.auth_extension",
-        "qwenpaw_plugins.multi_user.constants",
-        "qwenpaw_plugins.multi_user.config_extension",
-        "qwenpaw_plugins.multi_user.router_extension",
-        "qwenpaw_plugins.multi_user.middleware",
-        "qwenpaw_plugins.multi_user.manager_extension",
-        "qwenpaw_plugins.multi_user.provider_extension",
-        "qwenpaw_plugins.multi_user.migration_extension",
-        "qwenpaw_plugins.multi_user.user_context",
-        "qwenpaw_plugins.multi_user.token_parser",
+        "auth_extension",
+        "constants",
+        "config_extension",
+        "router_extension",
+        "middleware",
+        "manager_extension",
+        "provider_extension",
+        "migration_extension",
+        "user_context",
+        "token_parser",
     ]
     for m in mod_names:
         if m in sys.modules:
@@ -571,7 +574,7 @@ try:
     print(f"  [OK] Workspace initialized: {body['user_id']}")
 
     # Verify user dir was created
-    from qwenpaw_plugins.multi_user.auth_extension import get_user_working_dir
+    from auth_extension import get_user_working_dir
 
     tdir = get_user_working_dir(body["user_id"])
     assert tdir.is_dir(), f"User dir should exist: {tdir}"
@@ -588,7 +591,7 @@ except Exception as e:
 _print_section("TEST 13: User workspace file structure")
 
 try:
-    from qwenpaw_plugins.multi_user.auth_extension import get_user_working_dir
+    from auth_extension import get_user_working_dir
 
     # Build a user ID with the correct number of segments
     struct_parts = [f"S{i+1}" for i in range(len(USER_FIELDS))]
@@ -612,7 +615,7 @@ try:
         print(f"  [INFO] Primary user dir not yet created (may need login)")
 
     # Check secret dir structure
-    from qwenpaw_plugins.multi_user.auth_extension import get_user_secret_dir
+    from auth_extension import get_user_secret_dir
 
     sdir = get_user_secret_dir(tid)
     assert sdir.is_dir()
@@ -629,7 +632,7 @@ except Exception as e:
 _print_section("TEST 14: Auth data persistence (auth.json)")
 
 try:
-    from qwenpaw_plugins.multi_user.auth_extension import _load_auth_data
+    from auth_extension import _load_auth_data
 
     data = _load_auth_data()
     assert "jwt_secret" in data, \

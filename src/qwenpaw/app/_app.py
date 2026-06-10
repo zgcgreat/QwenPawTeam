@@ -44,21 +44,29 @@ from .auth import AuthMiddleware, auto_register_from_env
 # the PluginLoader during _background_startup(), but middleware is
 # registered at module level, so we must patch here.
 import os as _os
+import sys as _sys
 if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
     "true",
     "1",
     "yes",
 ):
     try:
-        from qwenpaw_plugins.multi_user.auth_extension import (
-            patch_auth_module,
+        # Import directly from the bundled plugin directory.
+        # The plugin's auth_extension.py uses direct imports (no relative
+        # package), so we add its directory to sys.path temporarily.
+        _mu_plugin_dir = str(
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "plugins" / "bundle" / "multi-user"
         )
+        if _mu_plugin_dir not in _sys.path:
+            _sys.path.insert(0, _mu_plugin_dir)
+        from auth_extension import patch_auth_module  # noqa: E402
         patch_auth_module()
         # Re-import to pick up the patched AuthMiddleware
         from . import auth as _auth_reimport
         AuthMiddleware = _auth_reimport.AuthMiddleware  # noqa: F811
     except Exception:
-        # qwenpaw_plugins.multi_user not available (e.g. fresh install)
+        # Multi-user plugin not available (e.g. fresh install)
         # — fall back to upstream AuthMiddleware.
         pass
 from .routers import router as api_router, create_agent_scoped_router
