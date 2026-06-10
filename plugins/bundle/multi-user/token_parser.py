@@ -2,7 +2,7 @@
 """Token parser for extracting user identity from business-system tokens.
 
 Ported from CoPaw's ``copaw.app.token_parser`` with naming adapted to
-qwenpaw_plugins.  This module is self-contained and has **no** dependency
+qwenpaw's multi-user plugin.  This module is self-contained and has **no** dependency
 on the upstream ``qwenpaw`` package — it only depends on
 ``auth_extension`` for the user ID helpers.
 

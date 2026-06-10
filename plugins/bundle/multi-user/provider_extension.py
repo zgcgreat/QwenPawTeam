@@ -552,8 +552,8 @@ def patch_provider_manager(real_manager) -> None:
 async def wrap_provider_for_user(app, provider_manager_instance):
     """Lifespan hook callback for ``post_provider_init``.
 
-    This is registered via :func:`qwenpaw_plugins.register_lifespan_hook`
-    and called by ``_app.py``'s lifespan right after the ProviderManager
+    This is registered via :func:`qwenpaw.plugins.api.PluginApi.register_startup_hook`
+    and called during ``_background_startup()`` right after the ProviderManager
     is obtained, before it is stored in ``app.state``.
 
     Parameters

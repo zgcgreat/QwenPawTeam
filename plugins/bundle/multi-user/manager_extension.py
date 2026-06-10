@@ -251,8 +251,8 @@ def patch_manager(manager_instance) -> None:
 async def wrap_manager_for_user(app, manager_instance):
     """Lifespan hook callback for ``post_manager_init``.
 
-    This is registered via :func:`qwenpaw_plugins.register_lifespan_hook`
-    and called by ``_app.py``'s lifespan right after the MultiAgentManager
+    This is registered via :func:`qwenpaw.plugins.api.PluginApi.register_startup_hook`
+    and called during ``_background_startup()`` right after the MultiAgentManager
     is created, before ``start_all_configured_agents()``.
 
     Parameters
@@ -276,7 +276,7 @@ def register_manager_patch_hook() -> None:
     .. deprecated::
         This function is kept for backward compatibility but is now a no-op.
         The actual hook registration is done in ``activate_multi_user()``
-        via ``qwenpaw_plugins.register_lifespan_hook()``.
+        via ``PluginApi.register_startup_hook()``.
     """
     logger.info("[multi-user/manager] Manager patch hook registered (patching done in _app.py lifespan)")
 
