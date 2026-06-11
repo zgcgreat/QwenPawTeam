@@ -46,17 +46,15 @@ export default function HeaderUserMenu({ className }: { className?: string }) {
     return fieldKey;
   };
 
-  const handleSwitchUser = () => {
-    clearAuthToken();
-    clearUserSession();
-    window.location.href = "/login";
-  };
-
   const handleLogout = () => {
     clearAuthToken();
     clearUserSession();
     window.location.href = "/login";
   };
+
+  // Switch user is the same flow as logout — clear session and redirect
+  // to login page so a different user can authenticate.
+  const handleSwitchUser = handleLogout;
 
   const userInfoLines = userInfo
     ? Object.entries(userInfo.fields).map(([key, value]) => (

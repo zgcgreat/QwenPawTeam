@@ -348,6 +348,46 @@ async def remove_user(user_id: str, request: Request):
     return {"success": True, "deleted_user_id": user_id}
 
 
+# ---------------------------------------------------------------------------
+# Token revocation endpoints (replacing upstream routes removed by _app.py)
+# ---------------------------------------------------------------------------
+
+
+class RevokeTokenRequest(BaseModel):
+    """Request body for revoking a single token."""
+    token: str
+
+
+@router.post("/revoke-token")
+async def revoke_token_endpoint(req: RevokeTokenRequest) -> dict:
+    """Revoke a single token by adding its jti to the blacklist.
+
+    This replaces the upstream ``/api/auth/revoke-token`` endpoint that
+    was removed during multi-user route override in ``_app.py``.
+    """
+    from auth_extension import revoke_token as _revoke_token
+
+    success = _revoke_token(req.token)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to revoke token")
+    return {"success": True}
+
+
+@router.post("/revoke-all-tokens")
+async def revoke_all_tokens_endpoint() -> dict:
+    """Revoke all existing tokens by rotating the JWT secret.
+
+    This replaces the upstream ``/api/auth/revoke-all-tokens`` endpoint
+    that was removed during multi-user route override in ``_app.py``.
+    """
+    from auth_extension import revoke_all_tokens as _revoke_all_tokens
+
+    success = _revoke_all_tokens()
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to revoke all tokens")
+    return {"success": True}
+
+
 def get_auth_router() -> APIRouter:
     """Return the multi-user auth router for inclusion in the app."""
     return router

@@ -12,6 +12,7 @@
 
 import { MULTI_USER_ENABLED, USER_INFO_SESSION_KEY } from "./index";
 import { clearAuthToken } from "../api/config";
+import { setHandle401 } from "../api/request";
 
 /**
  * User-aware 401 handler.
@@ -37,13 +38,10 @@ function userHandle401(): void {
  * Patch the 401 handler in `api/request.ts` with the user-aware version.
  *
  * Called synchronously during multi-user initialization.
+ * Uses the exported `setHandle401()` function instead of direct
+ * module namespace mutation (which doesn't work in ESM).
  */
 export function patchRequest401Handler(): void {
   if (!MULTI_USER_ENABLED) return;
-
-  // Import the request module and replace handle401 synchronously.
-  // Note: handle401 is exported as `export let`, so we must assign
-  // through the module namespace object, not the local binding.
-  const requestMod = require("../api/request");
-  requestMod.handle401 = userHandle401;
+  setHandle401(userHandle401);
 }

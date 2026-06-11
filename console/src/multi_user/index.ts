@@ -9,6 +9,7 @@
 
 import i18n from "i18next";
 import userResources from "./i18n/user.json";
+import { patchRequest401Handler } from "./requestExtension";
 
 /**
  * Runtime flag: is the multi-user plugin active?
@@ -35,4 +36,7 @@ export function initializeMultiUser(): void {
     // Merge into existing "translation" namespace so keys are accessible via t("login.username") etc.
     i18n.addResourceBundle(lang, "translation", resources, true, true);
   }
+
+  // Patch the 401 handler to clear user session data on auth failure
+  patchRequest401Handler();
 }

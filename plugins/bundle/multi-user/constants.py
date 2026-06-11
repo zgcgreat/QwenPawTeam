@@ -254,8 +254,10 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/console",
         "/console/",
         "/api/settings/language",
+        "/api/settings/upload-limit",
         # Plugin system (needed before auth completes)
         "/api/plugins",
+        "/api/frontend_plugin",
     },
 )
 
@@ -265,4 +267,5 @@ PUBLIC_PREFIXES: tuple[str, ...] = (
     "/dark-logo.png",
     "/qwenpaw-symbol.svg",
     "/qwenpaw-dark.png",
+    "/api/frontend_plugin/",
 )

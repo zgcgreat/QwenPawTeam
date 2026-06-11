@@ -8,7 +8,7 @@
  * - **multi_user** flag in status response
  */
 
-import { getApiUrl } from "../api/config";
+import { getApiUrl, getApiToken } from "../api/config";
 import type {
   LoginRequest,
   LoginResponse,
@@ -93,10 +93,7 @@ export const muAuthApi = {
     currentPassword: string,
     newPassword?: string,
   ): Promise<LoginResponse> => {
-    const token =
-      localStorage.getItem("qwenpaw_auth_token") ||
-      localStorage.getItem("copaw_auth_token") ||
-      "";
+    const token = getApiToken();
     const res = await fetch(getApiUrl("/auth/update-profile"), {
       method: "POST",
       headers: {
