@@ -995,6 +995,12 @@ def patch_auth_module() -> None:
     upstream_auth.USER_FIELDS = USER_FIELDS
     upstream_auth.PUBLIC_PATHS = PUBLIC_PATHS
     upstream_auth.PUBLIC_PREFIXES = PUBLIC_PREFIXES
+    # Also patch the underscore-prefixed names used internally by upstream
+    # auth.py, so any code that references _PUBLIC_PATHS / _PUBLIC_PREFIXES
+    # (including the original AuthMiddleware._should_skip_auth which we
+    # replaced entirely) gets the updated values.
+    upstream_auth._PUBLIC_PATHS = PUBLIC_PATHS
+    upstream_auth._PUBLIC_PREFIXES = PUBLIC_PREFIXES
 
     # Run auto-registration if configured
     auto_register_from_env()

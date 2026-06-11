@@ -735,6 +735,25 @@ if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
     # Invalidate cached OpenAPI schema
     app.openapi_schema = None
 
+    # Register a temporary /api/auth/status route so that the frontend
+    # auth guard does not hit a 404 during the brief window between
+    # upstream route removal (here, at module level) and plugin route
+    # registration (in _background_startup).  The plugin will replace
+    # this with its full-featured version once loaded.
+    from starlette.responses import JSONResponse as _JSONR
+    from starlette.routing import Route as _Route
+
+    async def _temp_auth_status(_request):
+        return _JSONR({"enabled": True, "has_users": False, "multi_user": True})
+
+    # Insert at the beginning so the plugin's version takes precedence
+    # once registered (FastAPI matches last-registered route first for
+    # same-path routes, but our plugin uses a separate include_router
+    # so it appends — we need the temp route to be findable during the gap).
+    app.router.routes.insert(
+        0, _Route("/api/auth/status", _temp_auth_status, methods=["GET"]),
+    )
+
 # Approval router: /api/approval/approve, /api/approval/deny, etc.
 app.include_router(approval_router, prefix="/api")
 

@@ -80,6 +80,17 @@ function UpstreamAuthGuard({ children }: { children: React.ReactNode }) {
       try {
         const res = await authApi.getStatus();
         if (cancelled) return;
+        // Safety check: if backend reports multi_user=true but the frontend
+        // was not built with VITE_MULTI_USER_ENABLED, warn the operator.
+        // The auth flow will still work via upstream endpoints, but the
+        // dynamic-field login page will not be available.
+        if (res.multi_user && !MULTI_USER_ENABLED) {
+          console.warn(
+            "[QwenPaw] Backend reports multi_user=true but frontend was " +
+            "built without VITE_MULTI_USER_ENABLED. The multi-user login " +
+            "page will not be available. Rebuild with VITE_MULTI_USER_ENABLED=true.",
+          );
+        }
         if (!res.enabled) {
           setStatus("ok");
           return;

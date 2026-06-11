@@ -9,6 +9,10 @@ export interface LoginResponse {
 export interface AuthStatusResponse {
   enabled: boolean;
   has_users: boolean;
+  /** Backend multi-user plugin adds this field when present. */
+  multi_user?: boolean;
+  /** Configured user field names when multi-user is active. */
+  user_fields?: string[];
 }
 
 export const authApi = {

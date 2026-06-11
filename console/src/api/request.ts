@@ -1,7 +1,7 @@
 import { getApiUrl, clearAuthToken } from "./config";
-// Multi-user: auth headers delegate to multi_user when enabled,
-// gracefully degrades to upstream behavior when disabled.
-import { buildAuthHeaders } from "../multi_user/authHeaders";
+// Use the authHeaders dispatcher which delegates to multi_user when enabled
+// and falls back to upstream behavior when disabled.
+import { buildAuthHeaders } from "./authHeaders";
 
 function getErrorMessageFromBody(
   text: string,

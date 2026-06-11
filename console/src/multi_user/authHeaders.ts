@@ -135,12 +135,14 @@ export function buildAuthHeaders(): Record<string, string> {
   }
 
   // Agent selection (both modes)
-  // NOTE: agentStore uses localStorage (via zustand/persist), so we must
-  // read from localStorage — NOT sessionStorage — to match the actual
-  // storage location.  Some legacy code clears sessionStorage on login
-  // which would lose the agent selection if we only checked there.
+  // When multi-user is enabled, agent selection is stored in localStorage
+  // (zustand/persist).  When disabled, match upstream behavior: prefer
+  // sessionStorage (per-tab agent) then fall back to localStorage.
   try {
-    const agentStorage = localStorage.getItem("qwenpaw-agent-storage");
+    const agentStorage = MULTI_USER_ENABLED
+      ? localStorage.getItem("qwenpaw-agent-storage")
+      : (sessionStorage.getItem("qwenpaw-agent-storage") ||
+         localStorage.getItem("qwenpaw-agent-storage"));
     if (agentStorage) {
       const parsed = JSON.parse(agentStorage);
       const selectedAgent = parsed?.state?.selectedAgent;
