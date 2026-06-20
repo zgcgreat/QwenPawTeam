@@ -5,7 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { buildSessionPath } from "../../../../utils/sessionRoute";
 import { Drawer, Spin, Tooltip } from "antd";
 import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import { IconButton } from "@agentscope-ai/design";
@@ -23,7 +24,6 @@ import { useTranslation } from "react-i18next";
 import type { ChatStatus } from "../../../../api/types/chat";
 import { chatApi } from "../../../../api/modules/chat";
 import sessionApi from "../../sessionApi";
-import { buildSessionPath } from "../../../../utils/sessionRoute";
 import { useCodingMode } from "../../../../stores/codingModeStore";
 import ChatSessionItem from "../ChatSessionItem";
 import { getChannelLabel } from "../../../Control/Channels/components";
@@ -107,6 +107,7 @@ interface ExtendedChatSession extends IAgentScopeRuntimeWebUISession {
   userId?: string;
   channel?: string;
   createdAt?: string | null;
+  updatedAt?: string | null;
   meta?: Record<string, unknown>;
   status?: ChatStatus;
   generating?: boolean;
@@ -122,6 +123,11 @@ interface ChatSessionDrawerProps {
   pinned?: boolean;
   /** Callback to toggle the pinned state */
   onPinChange?: (pinned: boolean) => void;
+  /**
+   * When true, render as an inline panel instead of an antd Drawer.
+   * The parent is responsible for layout (width, positioning, etc.).
+   */
+  embedded?: boolean;
 }
 
 /** Format an ISO 8601 timestamp to YYYY-MM-DD HH:mm:ss */
@@ -148,19 +154,38 @@ const getBackendId = (session: ExtendedChatSession): string | null => {
 const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { sessions, currentSessionId, setCurrentSessionId, setSessions } =
-    useChatAnywhereSessionsState();
+  const location = useLocation();
+  const sdkState = useChatAnywhereSessionsState();
   const { codingMode } = useCodingMode();
 
-  const { createSession } = useChatAnywhereSessions();
+  const sdkActions = useChatAnywhereSessions();
+
+  // In embedded mode, maintain a local session list fetched directly from the
+  // API so we don't depend on the SDK context tree (which lives inside
+  // AgentScopeRuntimeWebUI and may not be accessible from outside).
+  const [localSessions, setLocalSessions] = useState<
+    IAgentScopeRuntimeWebUISession[]
+  >([]);
+
+  const sessions = props.embedded ? localSessions : sdkState.sessions;
+  const { currentSessionId, setCurrentSessionId } = sdkState;
+  const setSessions = props.embedded ? setLocalSessions : sdkState.setSessions;
+  const createSession = sdkActions.createSession;
 
   /** Create a new session; close the drawer only when not pinned */
   const handleCreateSession = useCallback(async () => {
-    await createSession();
-    if (!props.pinned) {
-      props.onClose();
+    if (props.embedded) {
+      // In embedded mode, we're outside the SDK context tree.
+      // Dispatch a DOM event so ChatSessionInitializer (inside the tree) handles it.
+      window.dispatchEvent(new CustomEvent("qwenpaw:sidebar-new-chat"));
+    } else {
+      await createSession();
+      // Only close the drawer (not the embedded panel) when not pinned
+      if (!props.pinned) {
+        props.onClose();
+      }
     }
-  }, [createSession, props.onClose, props.pinned]);
+  }, [createSession, props.onClose, props.pinned, props.embedded]);
 
   /** ID of the session currently being renamed */
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -209,7 +234,7 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
     string | null
   >(null);
 
-  /** Sessions sorted by pinned first, then by createdAt descending */
+  /** Sessions sorted by pinned first, then by updatedAt/createdAt descending */
   const sortedSessions = useMemo(() => {
     return [...sessions].sort((a, b) => {
       const extA = a as ExtendedChatSession;
@@ -218,8 +243,8 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
       if (extA.pinned && !extB.pinned) return -1;
       if (!extA.pinned && extB.pinned) return 1;
 
-      const aTime = extA.createdAt;
-      const bTime = extB.createdAt;
+      const aTime = extA.updatedAt ?? extA.createdAt;
+      const bTime = extB.updatedAt ?? extB.createdAt;
       if (!aTime && !bTime) return 0;
       if (!aTime) return 1;
       if (!bTime) return -1;
@@ -285,6 +310,18 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
       if (sessionApi.isSessionSwitching) return;
       if (sessionId === currentSessionId) return;
 
+      if (props.embedded) {
+        // In embedded mode, we're outside the SDK context tree.
+        // Dispatch a DOM event so ChatSessionInitializer (inside the tree) handles it.
+        setSwitchingSessionId(sessionId);
+        window.dispatchEvent(
+          new CustomEvent("qwenpaw:sidebar-select-session", {
+            detail: { sessionId },
+          }),
+        );
+        return;
+      }
+
       // Lock immediately (synchronous) before any async work.
       sessionApi.isSessionSwitching = true;
       setSwitchingSessionId(sessionId);
@@ -297,14 +334,16 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
       sessionApi
         .preloadSession(sessionId)
         .then(({ realId }) => {
-          // Issue #5142: Navigate to the correct URL for the current mode.
-          const effectiveId = realId || sessionId;
-          const targetUrl = buildSessionPath(
-            codingMode ? "coding" : "chat",
-            effectiveId,
-          );
-          sessionApi.lastNavigatedChatId = effectiveId;
-          navigate(targetUrl, { replace: true });
+          // Issue #4987: In coding mode, skip URL navigation to /chat/<id>.
+          // The redirect effect in ChatPage would immediately navigate back
+          // to /coding before session data loads, causing the switch to fail.
+          // Instead, just set the session directly — the UI stays on /coding.
+          if (!codingMode) {
+            const effectiveId = realId || sessionId;
+            const targetUrl = buildSessionPath("chat", effectiveId);
+            sessionApi.lastNavigatedChatId = effectiveId;
+            navigate(targetUrl, { replace: true });
+          }
           // Now set currentSessionId — the library's getSession will hit cache.
           setCurrentSessionId(sessionId);
         })
@@ -326,8 +365,23 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
           setSwitchingSessionId(null);
         });
     },
-    [currentSessionId, setCurrentSessionId, navigate, codingMode],
+    [
+      currentSessionId,
+      setCurrentSessionId,
+      navigate,
+      codingMode,
+      props.embedded,
+    ],
   );
+
+  // In embedded mode, clear switchingSessionId when the URL changes
+  // (signals that the session switch initiated via DOM event has completed).
+  useEffect(() => {
+    if (props.embedded && switchingSessionId) {
+      setSwitchingSessionId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   /** Delete a session: call deleteChat API then refresh the list */
   const handleDelete = useCallback(
@@ -342,13 +396,25 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
       }
 
       if (currentSessionId === sessionId) {
-        const next = sessions.filter((s) => s.id !== sessionId);
-        setCurrentSessionId(next[0]?.id);
+        if (props.embedded) {
+          // In embedded mode, create a new chat via DOM event
+          // since we can't directly set the session from outside the context tree.
+          window.dispatchEvent(new CustomEvent("qwenpaw:sidebar-new-chat"));
+        } else {
+          const next = sessions.filter((s) => s.id !== sessionId);
+          setCurrentSessionId(next[0]?.id);
+        }
       }
 
       await refreshSessions();
     },
-    [sessions, currentSessionId, setCurrentSessionId, refreshSessions],
+    [
+      sessions,
+      currentSessionId,
+      setCurrentSessionId,
+      refreshSessions,
+      props.embedded,
+    ],
   );
 
   /** Enter rename mode for a session */
@@ -503,57 +569,36 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
     ],
   );
 
-  return (
-    <Drawer
-      open={props.open}
-      onClose={props.pinned ? undefined : props.onClose}
-      destroyOnHidden={!props.pinned}
-      placement="right"
-      width={360}
-      closable={false}
-      title={null}
-      mask={!props.pinned}
-      styles={{
-        header: { display: "none" },
-        body: {
-          padding: 0,
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
-          overflow: "hidden",
-        },
-        mask: { background: "transparent" },
-      }}
-      className={styles.drawer}
-    >
+  const panelContent = (
+    <>
       {/* Header bar */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
           <span className={styles.headerTitle}>{t("chat.allChats")}</span>
         </div>
         <div className={styles.headerRight}>
-          <Tooltip
-            title={
-              props.pinned
-                ? t("chat.unpinDrawer", "Unpin")
-                : t("chat.pinDrawer", "Pin")
-            }
-            mouseEnterDelay={0.5}
-          >
-            <IconButton
-              bordered={false}
-              icon={props.pinned ? <SparkLockFill /> : <SparkLockLine />}
-              className={props.pinned ? styles.pinActive : undefined}
-              onClick={() => props.onPinChange?.(!props.pinned)}
-            />
-          </Tooltip>
-          {!props.pinned && (
-            <IconButton
-              bordered={false}
-              icon={<SparkOperateRightLine />}
-              onClick={props.onClose}
-            />
+          {!props.embedded && (
+            <Tooltip
+              title={
+                props.pinned
+                  ? t("chat.unpinDrawer", "Unpin")
+                  : t("chat.pinDrawer", "Pin")
+              }
+              mouseEnterDelay={0.5}
+            >
+              <IconButton
+                bordered={false}
+                icon={props.pinned ? <SparkLockFill /> : <SparkLockLine />}
+                className={props.pinned ? styles.pinActive : undefined}
+                onClick={() => props.onPinChange?.(!props.pinned)}
+              />
+            </Tooltip>
           )}
+          <IconButton
+            bordered={false}
+            icon={<SparkOperateRightLine />}
+            onClick={props.onClose}
+          />
         </div>
       </div>
 
@@ -582,19 +627,17 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
             <Spin />
           </div>
         ) : (
-          <>
-            <FixedSizeList
-              height={listHeight}
-              width="100%"
-              itemCount={sortedSessions.length}
-              itemSize={ITEM_HEIGHT}
-              overscanCount={20}
-              itemData={itemData}
-              className={styles.list}
-            >
-              {SessionRow}
-            </FixedSizeList>
-          </>
+          <FixedSizeList
+            height={listHeight}
+            width="100%"
+            itemCount={sortedSessions.length}
+            itemSize={ITEM_HEIGHT}
+            overscanCount={20}
+            itemData={itemData}
+            className={styles.list}
+          >
+            {SessionRow}
+          </FixedSizeList>
         )}
         <div className={styles.bottomGradient} />
       </div>
@@ -607,6 +650,40 @@ const ChatSessionDrawer: React.FC<ChatSessionDrawerProps> = (props) => {
         items={contextMenuItems}
         onClose={sharedContextMenu.hide}
       />
+    </>
+  );
+
+  // Embedded mode: render as an inline panel (no Drawer wrapper)
+  if (props.embedded) {
+    if (!props.open) return null;
+    return <div className={styles.embeddedPanel}>{panelContent}</div>;
+  }
+
+  // Drawer mode (legacy)
+  return (
+    <Drawer
+      open={props.open}
+      onClose={props.pinned ? undefined : props.onClose}
+      destroyOnHidden={!props.pinned}
+      placement="right"
+      width={330}
+      closable={false}
+      title={null}
+      mask={!props.pinned}
+      styles={{
+        header: { display: "none" },
+        body: {
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+          overflow: "hidden",
+        },
+        mask: { background: "transparent" },
+      }}
+      className={styles.drawer}
+    >
+      {panelContent}
     </Drawer>
   );
 };
