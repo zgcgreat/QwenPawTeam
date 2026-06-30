@@ -5,6 +5,7 @@ The ``ApprovalService`` is the single central store for pending /
 completed approval records.  Approval is granted exclusively via
 the ``/daemon approve`` command in the chat interface.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...constant import TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS
 from ...security.tool_guard.approval import ApprovalDecision
+from .models import ApprovalRequestSummary
 
 if TYPE_CHECKING:
     from ...security.tool_guard.models import ToolGuardResult
@@ -77,6 +79,35 @@ class ApprovalService:
         """Store a reference to the channel manager for push notifications."""
         self._channel_manager = channel_manager
 
+    async def _notify_channel(
+        self,
+        pending: PendingApproval,
+        channel_body: str,
+    ) -> None:
+        """Fire-and-forget: push approval notification to channel."""
+        if self._channel_manager is None:
+            return
+        if not pending.channel or pending.channel == "console":
+            return
+        try:
+            channel_meta = (pending.extra or {}).get("channel_meta")
+            await self._channel_manager.push_approval_notification(
+                channel=pending.channel,
+                session_id=pending.session_id,
+                user_id=pending.user_id,
+                request_id=pending.request_id,
+                tool_name=pending.tool_name,
+                severity=pending.severity,
+                result_summary=channel_body,
+                channel_meta=channel_meta,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to push approval notification: request_id=%s",
+                pending.request_id[:8],
+                exc_info=True,
+            )
+
     # ------------------------------------------------------------------
     # Core approval lifecycle
     # ------------------------------------------------------------------
@@ -96,7 +127,10 @@ class ApprovalService:
         extra: dict[str, Any] | None = None,
     ) -> PendingApproval:
         """Create a pending approval record and return it."""
-        from ...security.tool_guard.approval import format_findings_summary
+        from ...security.tool_guard.approval import (
+            format_channel_approval_body,
+            format_findings_summary,
+        )
 
         request_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
@@ -133,6 +167,73 @@ class ApprovalService:
             session_id[:8],
             root_session_id[:8],
         )
+
+        if self._channel_manager and channel and channel != "console":
+            channel_body = format_channel_approval_body(result)
+            asyncio.create_task(
+                self._notify_channel(pending, channel_body),
+                name=f"approval-notify-{request_id[:8]}",
+            )
+
+        return pending
+
+    async def create_pending_summary(
+        self,
+        *,
+        session_id: str,
+        root_session_id: str,
+        owner_agent_id: str,
+        user_id: str,
+        channel: str,
+        agent_id: str,
+        summary: ApprovalRequestSummary,
+        timeout_seconds: float = TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS,
+        extra: dict[str, Any] | None = None,
+    ) -> PendingApproval:
+        """Create a pending approval from a generic summary."""
+        request_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        merged_extra = {
+            "source_type": summary.source_type,
+            **summary.payload,
+            **dict(extra or {}),
+        }
+        pending = PendingApproval(
+            request_id=request_id,
+            session_id=session_id,
+            root_session_id=root_session_id,
+            owner_agent_id=owner_agent_id,
+            user_id=user_id,
+            channel=channel,
+            agent_id=agent_id,
+            tool_name=summary.name,
+            created_at=time.time(),
+            future=loop.create_future(),
+            timeout_seconds=timeout_seconds,
+            result_summary=summary.result_summary,
+            findings_count=summary.findings_count,
+            severity=summary.severity,
+            extra=merged_extra,
+        )
+        async with self._lock:
+            self._pending[request_id] = pending
+            self._gc_pending_locked()
+        logger.info(
+            "Generic approval pending created: request_id=%s agent_id=%s "
+            "name=%s source=%s session=%s root=%s",
+            request_id[:8],
+            agent_id,
+            summary.name,
+            summary.source_type,
+            session_id[:8],
+            root_session_id[:8],
+        )
+
+        if self._channel_manager and channel and channel != "console":
+            asyncio.create_task(
+                self._notify_channel(pending, pending.result_summary),
+                name=f"approval-notify-{request_id[:8]}",
+            )
 
         return pending
 

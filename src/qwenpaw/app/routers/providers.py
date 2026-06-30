@@ -16,7 +16,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from agentscope_runtime.engine.schemas.exception import (
+from qwenpaw.exceptions import (
     AppBaseException,
 )
 
@@ -35,8 +35,10 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 ChatModelName = Literal[
     "OpenAIChatModel",
+    "OpenAIResponseModel",
     "AnthropicChatModel",
     "GeminiChatModel",
+    "DashScopeChatModel",
 ]
 
 # effective: agent-specific if set, otherwise global

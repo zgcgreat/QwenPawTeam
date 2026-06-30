@@ -32,7 +32,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentscope_runtime.engine.schemas.agent_schemas import (
+from qwenpaw.schemas import (
     TextContent,
     ImageContent,
     VideoContent,
@@ -1146,52 +1146,6 @@ class TestTelegramBuildAgentRequest:
 
         assert request.user_id == "user123"  # From sender_id
         assert request.channel == "telegram"  # Default channel
-
-
-# =============================================================================
-# P1: No Text Debounce
-# =============================================================================
-
-
-class TestTelegramNoTextDebounce:
-    """Tests for _apply_no_text_debounce override."""
-
-    def test_media_only_triggers_immediate_processing(
-        self,
-        telegram_channel,
-    ):
-        """Media-only content should trigger immediate processing."""
-        parts = [
-            ImageContent(
-                type=ContentType.IMAGE,
-                image_url="http://example.com/img.jpg",
-            ),
-        ]
-
-        should_process, merged = telegram_channel._apply_no_text_debounce(
-            "session_1",
-            parts,
-        )
-
-        assert should_process is True
-        assert len(merged) == 1
-
-    def test_text_content_uses_base_behavior(
-        self,
-        telegram_channel,
-    ):
-        """Text content should use base class debounce logic."""
-        parts = [
-            TextContent(type=ContentType.TEXT, text="Hello"),
-        ]
-
-        should_process, merged = telegram_channel._apply_no_text_debounce(
-            "session_2",
-            parts,
-        )
-
-        assert should_process is True
-        assert len(merged) == 1
 
 
 # =============================================================================

@@ -12,7 +12,7 @@ import json
 from pydantic import BaseModel
 
 from agentscope.model import ChatModelBase
-from agentscope_runtime.engine.schemas.exception import (
+from qwenpaw.exceptions import (
     ModelNotFoundException,
 )
 
@@ -20,6 +20,7 @@ from ..constant import SECRET_DIR
 from ..config.config import ModelSlotConfig
 from ..exceptions import ProviderError
 from .anthropic_provider import AnthropicProvider
+from .dashscope_provider import DashScopeProvider
 from .gemini_provider import GeminiProvider
 from .ollama_provider import OllamaProvider
 from .openai_provider import (
@@ -27,6 +28,7 @@ from .openai_provider import (
     OpenCodeProvider,
     KiloProvider,
 )
+from .openai_response_provider import OpenAIResponseProvider
 from .lmstudio_provider import LMStudioProvider
 from .provider import (
     ModelInfo,
@@ -66,22 +68,29 @@ MODELSCOPE_MODELS: List[ModelInfo] = [
 
 DASHSCOPE_MODELS: List[ModelInfo] = [
     ModelInfo(
-        id="qwen3-max",
-        name="Qwen3 Max",
+        id="qwen3.7-max",
+        name="Qwen3.7 Max",
         supports_image=False,
         supports_video=False,
         probe_source="documentation",
     ),
     ModelInfo(
-        id="qwen3-235b-a22b-thinking-2507",
-        name="Qwen3 235B A22B Thinking",
-        supports_image=False,
-        supports_video=False,
+        id="qwen3.7-plus",
+        name="Qwen3.7 Plus",
+        supports_image=True,
+        supports_video=True,
         probe_source="documentation",
     ),
     ModelInfo(
-        id="deepseek-v3.2",
-        name="DeepSeek-V3.2",
+        id="qwen3.6-plus",
+        name="Qwen3.6 Plus",
+        supports_image=True,
+        supports_video=True,
+        probe_source="documentation",
+    ),
+    ModelInfo(
+        id="deepseek-v4-pro",
+        name="DeepSeek-V4 Pro",
         supports_image=False,
         supports_video=False,
         probe_source="documentation",
@@ -790,7 +799,7 @@ PROVIDER_MODELSCOPE = OpenAIProvider(
     freeze_url=True,
 )
 
-PROVIDER_DASHSCOPE = OpenAIProvider(
+PROVIDER_DASHSCOPE = DashScopeProvider(
     id="dashscope",
     name="DashScope",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -940,6 +949,16 @@ PROVIDER_OPENAI = OpenAIProvider(
     name="OpenAI",
     base_url="https://api.openai.com/v1",
     api_key_prefix="sk-",
+    models=OPENAI_MODELS,
+    freeze_url=True,
+)
+
+PROVIDER_OPENAI_RESPONSE = OpenAIResponseProvider(
+    id="openai-response",
+    name="OpenAI (Response API)",
+    base_url="https://api.openai.com/v1",
+    api_key_prefix="sk-",
+    chat_model="OpenAIResponseModel",
     models=OPENAI_MODELS,
     freeze_url=True,
 )
@@ -1289,6 +1308,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self._add_builtin(PROVIDER_OPENCODE)
         self._add_builtin(PROVIDER_KILO)
         self._add_builtin(PROVIDER_OPENAI)
+        self._add_builtin(PROVIDER_OPENAI_RESPONSE)
         self._add_builtin(PROVIDER_AZURE_OPENAI)
         self._add_builtin(PROVIDER_ANTHROPIC)
         self._add_builtin(PROVIDER_GEMINI)
@@ -1559,6 +1579,20 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 result.get("supports_image"),
                 result.get("supports_video"),
             )
+            # Heal a poisoned ``rejects_media`` cache entry: if the
+            # probe actually saw the image, force ``rejects_media`` to
+            # False so subsequent ``_reasoning`` calls stop stripping
+            # media.  Without this, a stale entry written from an
+            # unrelated 400 (request too large, malformed block fields)
+            # would silently drop every future image.
+            if result.get("supports_image"):
+                from .model_capability_cache import get_capability_cache
+
+                get_capability_cache().learn(
+                    f"{provider_id}:{model_id}",
+                    "rejects_media",
+                    False,
+                )
         except Exception as e:
             logger.warning("Auto-probe multimodal failed: %s", e)
 
@@ -1874,6 +1908,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 return True
         return False
 
+    # pylint: disable=too-many-return-statements
     def _provider_from_data(self, data: Dict) -> Provider:
         """Deserialize provider data to a concrete provider type."""
         provider_id = str(data.get("id", ""))
@@ -1885,8 +1920,12 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             return AnthropicProvider.model_validate(data)
         if provider_id == "gemini" or chat_model == "GeminiChatModel":
             return GeminiProvider.model_validate(data)
+        if provider_id == "dashscope" or chat_model == "DashScopeChatModel":
+            return DashScopeProvider.model_validate(data)
         if provider_id == "ollama":
             return OllamaProvider.model_validate(data)
+        if chat_model == "OpenAIResponseModel":
+            return OpenAIResponseProvider.model_validate(data)
         return OpenAIProvider.model_validate(data)
 
     def save_active_model(self, active_model: ModelSlotConfig):
@@ -2078,6 +2117,12 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     builtin.auth_mode = provider.auth_mode
                 if provider.custom_headers:
                     builtin.custom_headers = provider.custom_headers
+                # Restore the configurable inline-media cap for the providers
+                # that support it (currently DashScope).
+                if hasattr(builtin, "max_inline_media_bytes"):
+                    builtin.max_inline_media_bytes = (
+                        provider.max_inline_media_bytes
+                    )
                 builtin_model_ids = {m.id for m in builtin.models}
                 builtin.extra_models = [
                     m

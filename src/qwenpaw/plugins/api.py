@@ -322,36 +322,39 @@ class PluginApi:
                 f"'{handler.command_name}' (priority={priority_level})",
             )
 
-    def register_prompt_section(
+    def register_middleware(
         self,
-        name: str,
-        provider: Callable[[Any], str],
+        middleware_factory: Callable,
         *,
-        after: str = "workspace",
-        agent_id: Optional[str] = None,
+        priority: int = 100,
     ) -> None:
-        """Register a system-prompt section provider.
+        """Register an AgentScope MiddlewareBase factory.
+
+        The factory is called once per request during agent assembly:
+            ``factory(ctx, agent_config) -> MiddlewareBase | None``
+
+        Returning None means the middleware is skipped for this request.
+        Priority controls ordering (lower = outermost in onion model).
 
         Args:
-            name: Unique prompt section name, e.g. ``"datapaw.master"``.
-            provider: Callable receiving the agent instance and returning text.
-            after: Host anchor this section follows.
-                Valid: ``"workspace"``, ``"multimodal"``, ``"env_context"``.
-            agent_id: Optional agent id filter; ``None`` applies to all agents.
+            middleware_factory: Callable that receives ``(ctx, agent_config)``
+                and returns a ``MiddlewareBase`` instance or None.
+            priority: Ordering priority (lower = outermost). Default: 100.
+
+        Example:
+            >>> def my_factory(ctx, agent_config):
+            ...     return MyMiddleware()
+            >>> api.register_middleware(my_factory, priority=50)
         """
         if self._registry:
-            self._registry.register_prompt_section(
+            self._registry.register_middleware(
                 plugin_id=self.plugin_id,
-                name=name,
-                after=after,
-                agent_id=agent_id,
-                provider=provider,
+                factory=middleware_factory,
+                priority=priority,
             )
             logger.info(
-                "Plugin '%s' registered prompt section '%s' after '%s'",
-                self.plugin_id,
-                name,
-                after,
+                f"Plugin '{self.plugin_id}' registered middleware "
+                f"factory (priority={priority})",
             )
 
     @property
@@ -598,6 +601,41 @@ class PluginApi:
             callback=_uninstall_skills,
         )
 
+    def unregister_skill_provider(self) -> None:
+        """Unregister this plugin as a skill provider.
+
+        Removes the startup, workspace_created, and uninstall hooks
+        that were registered by ``register_skill_provider()``, and
+        cleans up skills sourced from this plugin across all existing
+        workspaces.
+
+        This allows plugins to dynamically disable their skill
+        provider without requiring a full plugin uninstall.
+
+        Example:
+            >>> api.unregister_skill_provider()
+        """
+        source_tag = f"plugin:{self.plugin_id}"
+        hook_names = [
+            f"install_skills_{self.plugin_id}",
+            f"provision_skills_{self.plugin_id}",
+            f"uninstall_skills_{self.plugin_id}",
+        ]
+
+        # Remove the hooks from registry
+        if self._registry:
+            self._registry.remove_hooks_by_name(
+                self.plugin_id,
+                hook_names,
+            )
+
+        # Clean up already-installed skills
+        self._do_uninstall_skills(self.plugin_id, source_tag)
+
+        logger.info(
+            f"Plugin '{self.plugin_id}' unregistered as skill provider",
+        )
+
     def _get_skill_names(self, skills_dir: Path) -> List[str]:
         """Return sub-directory names that contain a SKILL.md file."""
         if not skills_dir.exists() or not skills_dir.is_dir():
@@ -670,9 +708,10 @@ class PluginApi:
                     entry = skills.get(name)
                     if entry is None:
                         continue
+                    if entry.get("source") != _src:
+                        entry["enabled"] = _enabled
+                        entry["channels"] = list(_channels)
                     entry["source"] = _src
-                    entry["enabled"] = _enabled
-                    entry["channels"] = _channels
                 return payload
 
             mutate_json(

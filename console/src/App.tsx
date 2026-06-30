@@ -26,6 +26,8 @@ import MainLayout from "./layouts/MainLayout";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import { PluginProvider, usePlugins } from "./plugins/PluginContext";
 import { ApprovalProvider } from "./contexts/ApprovalContext";
+import { DesktopUpdateProvider } from "./contexts/DesktopUpdateContext";
+import { UpdateTakeoverGate } from "./components/UpdateTakeoverPage";
 import { Suspense } from "react";
 import { lazyImportWithRetry } from "./utils/lazyWithRetry";
 
@@ -38,6 +40,7 @@ import { authApi } from "./api/modules/auth";
 import { languageApi } from "./api/modules/language";
 import { useUploadLimitStore } from "./stores/uploadLimitStore";
 import { getApiUrl, getApiToken, clearAuthToken } from "./api/config";
+import CloseWindowPrompt from "./tauri/CloseWindowPrompt";
 import "./styles/layout.css";
 import "./styles/form-override.css";
 
@@ -212,30 +215,35 @@ function AppInner() {
         }}
       >
         <AntdApp>
-          <ApprovalProvider>
-            <Routes>
-              <Route
-                path="/login"
-                element={
-                  MULTI_USER_ENABLED ? (
-                    <MuLoginPage />
-                  ) : (
-                    <Suspense fallback={null}>
-                      <LoginPage />
-                    </Suspense>
-                  )
-                }
-              />
-              <Route
-                path="/*"
-                element={
-                  <ActiveAuthGuard>
-                    <MainLayout />
-                  </ActiveAuthGuard>
-                }
-              />
-            </Routes>
-          </ApprovalProvider>
+          <CloseWindowPrompt />
+          <DesktopUpdateProvider>
+            <UpdateTakeoverGate>
+              <ApprovalProvider>
+                <Routes>
+                  <Route
+                    path="/login"
+                    element={
+                      MULTI_USER_ENABLED ? (
+                        <MuLoginPage />
+                      ) : (
+                        <Suspense fallback={null}>
+                          <LoginPage />
+                        </Suspense>
+                      )
+                    }
+                  />
+                  <Route
+                    path="/*"
+                    element={
+                      <ActiveAuthGuard>
+                        <MainLayout />
+                      </ActiveAuthGuard>
+                    }
+                  />
+                </Routes>
+              </ApprovalProvider>
+            </UpdateTakeoverGate>
+          </DesktopUpdateProvider>
         </AntdApp>
       </ConfigProvider>
     </BrowserRouter>
