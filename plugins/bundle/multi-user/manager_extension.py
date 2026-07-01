@@ -114,9 +114,47 @@ class UserAwareMultiAgentManager:
 
             config = load_config(user_id=effective)
 
-            if agent_id in config.agents.profiles:
-                agent_ref = config.agents.profiles[agent_id]
+            if agent_id not in config.agents.profiles:
+                # Step 3: Fallback to "default" user's cache only if the
+                # current user has NO config for this agent_id.
+                if effective != "default":
+                    default_agents = self._users.get("default", {})
+                    if agent_id in default_agents:
+                        logger.info(
+                            "[multi-user/manager] get_agent fallback: "
+                            "agent_id=%s not in user '%s' config, using shared default",
+                            agent_id, effective,
+                        )
+                        return default_agents[agent_id]
 
+                raise ValueError(
+                    f"Agent '{agent_id}' not found in config for "
+                    f"user '{effective}'. Available: "
+                    f"{list(config.agents.profiles.keys())}"
+                )
+
+            agent_ref = config.agents.profiles[agent_id]
+
+            # Delegate to WorkspaceRegistry._create_workspace() so that
+            # bootstrap_plugins_kwargs and app_services are injected
+            # correctly, rather than constructing Workspace() directly.
+            from qwenpaw.app.workspace_registry import WorkspaceRegistry
+
+            workspace_registry = getattr(
+                getattr(self._real, 'app_services', None),
+                '_workspace_registry', None,
+            ) or (
+                isinstance(self._real, WorkspaceRegistry) and self._real
+            )
+
+            if workspace_registry is not None:
+                instance = workspace_registry._create_workspace(
+                    agent_id=agent_id,
+                    workspace_dir=agent_ref.workspace_dir,
+                )
+            else:
+                # Fallback: no WorkspaceRegistry available (shouldn't happen in
+                # normal operation, but covers edge cases during early startup).
                 from qwenpaw.app.workspace import Workspace
 
                 instance = Workspace(
@@ -124,36 +162,16 @@ class UserAwareMultiAgentManager:
                     workspace_dir=agent_ref.workspace_dir,
                 )
 
-                await instance.start()
-                instance.set_manager(self)
-                user_agents[agent_id] = instance
-                logger.info(
-                    "[multi-user/manager] Created agent '%s' for user '%s': "
-                    "started=%s, channel_manager=%s, workspace_dir=%s",
-                    agent_id, effective, instance._started,
-                    instance.channel_manager, instance.workspace_dir,
-                )
-                return instance
-
-            # Step 3: Fallback to "default" user's cache only if the
-            # current user has NO config for this agent_id.  This avoids
-            # cross-user data leakage while still allowing shared access
-            # to the default agent when a user has no config of their own.
-            if effective != "default":
-                default_agents = self._users.get("default", {})
-                if agent_id in default_agents:
-                    logger.info(
-                        "[multi-user/manager] get_agent fallback: "
-                        "agent_id=%s not in user '%s' config, using shared default",
-                        agent_id, effective,
-                    )
-                    return default_agents[agent_id]
-
-            raise ValueError(
-                f"Agent '{agent_id}' not found in config for "
-                f"user '{effective}'. Available: "
-                f"{list(config.agents.profiles.keys())}"
+            await instance.start()
+            instance.set_manager(self)
+            user_agents[agent_id] = instance
+            logger.info(
+                "[multi-user/manager] Created agent '%s' for user '%s': "
+                "started=%s, channel_manager=%s, workspace_dir=%s",
+                agent_id, effective, instance._started,
+                instance.channel_manager, instance.workspace_dir,
             )
+            return instance
 
     async def stop_agent(self, agent_id: str, user_id: Optional[str] = None) -> bool:
         """Stop a specific agent instance."""

@@ -239,6 +239,7 @@ _LOCAL_BINDING_MODULES: list[str] = [
     "qwenpaw.app.routers.agents",
     "qwenpaw.app.routers.settings",
     "qwenpaw.app.routers.providers",
+    "qwenpaw.app.routers.files",
     "qwenpaw.app.routers.mcp",
     "qwenpaw.app.routers.backup",
     "qwenpaw.app.routers.plan",

@@ -97,10 +97,11 @@ class DeleteUserRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(req: LoginRequest):
+async def login(request: Request, req: LoginRequest):
     """Authenticate with user fields and password.
 
     Auto-registers if user does not exist.
+    Includes rate limiting via upstream's LoginRateLimiter.
     """
     from auth_extension import (
         authenticate,
@@ -116,15 +117,37 @@ async def login(req: LoginRequest):
             empty_resp[field] = ""
         return LoginResponse(**empty_resp)
 
+    # --- Rate limiting (reuse upstream LoginRateLimiter) ---
+    from qwenpaw.app.rate_limiter import rate_limiter
+
+    client_ip = request.client.host if request.client else "unknown"
+    username = getattr(req, USER_FIELDS[0], "") if USER_FIELDS else ""
+
+    if rate_limiter.is_ip_limited(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts from this IP. Try again later.",
+        )
+    if username and rate_limiter.is_user_limited(username):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts for this user. Try again later.",
+        )
+
     stripped = {}
     for field in USER_FIELDS:
         stripped[field] = getattr(req, field).strip()
 
     token = authenticate(req.password, **stripped)
-    if token is None:
+    success = token is not None
+    if not success:
         token = register_user(req.password, **stripped)
-        if token is None:
+        success = token is not None
+        if not success:
+            rate_limiter.record_login_attempt(client_ip, username, False)
             raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    rate_limiter.record_login_attempt(client_ip, username, True)
 
     user_id = build_user_id(**stripped)
 
