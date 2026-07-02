@@ -18,9 +18,33 @@ from .tools import router as tools_router
 from ..crons.api import router as cron_router
 from ..chats.api import router as runner_router
 from .console import router as console_router
+from .fork import router as fork_router
 from .token_usage import router as token_usage_router
 from .agent_stats import router as agent_stats_router
 from .auth import router as auth_router
+
+# --- Multi-user plugin compatibility ---
+# If the multi-user plugin is installed (either as a bundled plugin in
+# the source tree or deployed to ~/.qwenpaw/plugins/), it provides its
+# own enhanced auth routes at /api/auth.  Skip the upstream auth_router
+# to avoid conflicts (FastAPI matches routes in registration order, and
+# the upstream routes would take precedence since they're registered
+# earlier).
+import os as _os
+_plugins_dir = _os.path.join(
+    _os.path.expanduser("~"), ".qwenpaw", "plugins", "multi-user"
+)
+# Also check the bundled plugin directory (source-tree layout) so that
+# _skip_upstream_auth is True even when the plugin has not been
+# explicitly installed to ~/.qwenpaw/plugins/.
+# __file__ = src/qwenpaw/app/routers/__init__.py → 5 dirname levels → project root
+_bundled_dir = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(
+        _os.path.dirname(_os.path.abspath(__file__))
+    )))),
+    "plugins", "bundle", "multi-user",
+)
+_skip_upstream_auth = _os.path.isdir(_plugins_dir) or _os.path.isdir(_bundled_dir)
 from .messages import router as messages_router
 from .files import router as files_router
 from .settings import router as settings_router
@@ -36,6 +60,7 @@ router = APIRouter()
 router.include_router(agents_router)
 router.include_router(config_router)
 router.include_router(console_router)
+router.include_router(fork_router)
 router.include_router(cron_router)
 router.include_router(local_models_router)
 router.include_router(mcp_oauth_router)
@@ -51,7 +76,8 @@ router.include_router(workspace_router)
 router.include_router(envs_router)
 router.include_router(token_usage_router)
 router.include_router(agent_stats_router)
-router.include_router(auth_router)
+if not _skip_upstream_auth:
+    router.include_router(auth_router)
 router.include_router(files_router)
 router.include_router(settings_router)
 router.include_router(plugins_router)

@@ -70,6 +70,7 @@ from .routers import router as api_router, create_agent_scoped_router
 from .routers.agent_scoped import AgentContextMiddleware
 from .routers.approval import router as approval_router
 from .routers.coding_mode import router as coding_mode_router
+from .routers.loops import router as loops_router
 from .routers.tool_calls import router as tool_calls_router
 from .routers.voice import voice_router
 from ..envs import load_envs_into_environ
@@ -445,11 +446,13 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
         try:
             from ..modes.coding import CodingMode
             from ..modes.mission import MissionMode
+            from ..modes.goal import GoalMode
 
             # pylint: disable-next=protected-access
             workspace_registry._bootstrap_kwargs["builtin_mode_clses"] = [
                 CodingMode,
                 MissionMode,
+                GoalMode,
             ]
             logger.debug("Built-in modes collected")
         except Exception:
@@ -554,9 +557,30 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
             # We load bundled and user plugins in parallel for performance,
             # then merge their registries so that all hooks/providers are
             # available regardless of which directory they came from.
-            _bundle_dir = str(
-                Path(__file__).resolve().parent.parent.parent.parent
-                / "plugins" / "bundle"
+            #
+            # Bundle directory resolution order:
+            # 1. QWENPAW_BUNDLE_DIR env var (explicit override)
+            # 2. Relative to __file__ (works in editable/source installs)
+            # 3. WORKING_DIR / plugins / bundle (works in packaged installs)
+            _bundle_dir = _os.environ.get("QWENPAW_BUNDLE_DIR", "")
+            if not _bundle_dir or not Path(_bundle_dir).exists():
+                _src_bundle = (
+                    Path(__file__).resolve().parent.parent.parent.parent
+                    / "plugins" / "bundle"
+                )
+                if _src_bundle.exists():
+                    _bundle_dir = str(_src_bundle)
+                else:
+                    from ..constant import WORKING_DIR as _WD
+                    _wd_bundle = Path(_WD) / "plugins" / "bundle"
+                    if _wd_bundle.exists():
+                        _bundle_dir = str(_wd_bundle)
+                    else:
+                        _bundle_dir = str(_src_bundle)  # fallback, will log warning
+            logger.info(
+                "Bundle plugin directory resolved to: %s (exists=%s)",
+                _bundle_dir,
+                Path(_bundle_dir).exists(),
             )
 
             async def _load_plugins_in_dir(plugin_dir: str, label: str):
@@ -579,10 +603,52 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-branches
                 _load_plugins_in_dir(get_plugins_dir(), "user"),
             )
 
+            # Merge bundled & user plugin registries into the main
+            # plugin_loader.registry so that hooks, providers, and
+            # control commands are all discoverable.
+            for _aux_loader in (_bundled_loader, _user_plugins_loader):
+                if _aux_loader is None:
+                    continue
+                # Transfer loaded plugin records
+                for _pid, _prec in _aux_loader._loaded_plugins.items():
+                    if _pid not in plugin_loader._loaded_plugins:
+                        plugin_loader._loaded_plugins[_pid] = _prec
+                # Transfer registry entries (hooks, providers, etc.)
+                _src = _aux_loader.registry
+                _dst = plugin_loader.registry
+                for _h in _src._startup_hooks:
+                    if not any(
+                        h.plugin_id == _h.plugin_id and h.hook_name == _h.hook_name
+                        for h in _dst._startup_hooks
+                    ):
+                        _dst._startup_hooks.append(_h)
+                for _h in _src._shutdown_hooks:
+                    if not any(
+                        h.plugin_id == _h.plugin_id and h.hook_name == _h.hook_name
+                        for h in _dst._shutdown_hooks
+                    ):
+                        _dst._shutdown_hooks.append(_h)
+                for _pid, _prov in _src._providers.items():
+                    if _pid not in _dst._providers:
+                        _dst._providers[_pid] = _prov
+                for _cmd in _src._control_commands:
+                    if not any(
+                        c.plugin_id == _cmd.plugin_id
+                        and c.handler.command_name == _cmd.handler.command_name
+                        for c in _dst._control_commands
+                    ):
+                        _dst._control_commands.append(_cmd)
+                # Also transfer runtime helpers if set
+                if _src._runtime_helpers is not None and _dst._runtime_helpers is None:
+                    _dst.set_runtime_helpers(_src._runtime_helpers)
+
             runtime_helpers = RuntimeHelpers(
                 provider_manager=provider_manager,
             )
             plugin_loader.registry.set_runtime_helpers(runtime_helpers)
+            plugin_loader.registry.set_workspace_manager(
+                workspace_registry,
+            )
 
             for (
                 provider_id,
@@ -934,50 +1000,117 @@ app.include_router(tool_calls_router, prefix="/api")
 # were registered earlier).
 #
 # The correct fix is: when multi-user is active, remove the upstream
-# auth routes so the plugin's routes take effect.  We do this by
-# deleting routes whose path starts with "/api/auth/" from the app's
-# route list, then letting the plugin re-add its own versions later
-# during _background_startup().
-if _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in (
-    "true",
-    "1",
-    "yes",
+# auth sub-router so the plugin's routes take effect.  We do this by
+# removing the auth sub-router from the api_router's nested route
+# list, then letting the plugin re-add its own versions later during
+# _background_startup().
+#
+# NOTE: FastAPI >=0.115 uses _IncludedRouter objects in the route
+# tree.  Upstream auth routes are NOT top-level APIRoute objects —
+# they are nested inside _IncludedRouter.original_router.routes as a
+# sub-_IncludedRouter with prefix="/auth".  A simple flat scan over
+# app.router.routes would miss them entirely.
+# ── Multi-user: replace upstream auth routes with plugin routes ────
+# When multi-user is enabled AND the multi-user plugin is available
+# (either as a bundled plugin or installed to ~/.qwenpaw/plugins/),
+# the plugin's router_extension registers its own /auth/* endpoints
+# via register_http_router.  However, the upstream auth router may
+# already be included in api_router above, so both sets of /auth/*
+# routes exist — and FastAPI matches the upstream ones first.
+#
+# When the plugin is available, we remove the upstream auth sub-router
+# and register temporary placeholder routes that bridge the gap until
+# the plugin's real routes are registered in _background_startup().
+#
+# If the plugin is NOT available (neither bundled nor installed), we
+# leave the upstream auth routes intact so the app works normally.
+_mu_plugin_installed = _os.path.isdir(_os.path.join(
+    _os.path.expanduser("~"), ".qwenpaw", "plugins", "multi-user",
+)) or _os.path.isdir(str(
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "plugins" / "bundle" / "multi-user"
+))
+
+if (
+    _os.environ.get("QWENPAW_MULTI_USER_ENABLED", "true").lower() in ("true", "1", "yes")
+    and _mu_plugin_installed
 ):
-    _routes = app.router.routes
-    _auth_prefix = "/api/auth/"
-    # Collect indices of upstream auth routes to remove (iterate
-    # backwards to avoid index shifting during deletion).
-    _to_remove = [
-        i for i, r in enumerate(_routes)
-        if hasattr(r, "path") and r.path.startswith(_auth_prefix)
-    ]
-    for _i in reversed(_to_remove):
-        _routes.pop(_i)
-    if _to_remove:
+    _removed_count = 0
+
+    # Strategy: walk app.router.routes → find the _IncludedRouter that
+    # wraps api_router → walk its original_router.routes → find and
+    # remove the sub-router with prefix="/auth".
+    for _top in app.router.routes:
+        if type(_top).__name__ != "_IncludedRouter":
+            continue
+        _orig = getattr(_top, "original_router", None)
+        if _orig is None or not hasattr(_orig, "routes"):
+            continue
+        _sub_indices = [
+            j for j, _sub in enumerate(_orig.routes)
+            if (
+                type(_sub).__name__ == "_IncludedRouter"
+                and getattr(_sub, "original_router", None) is not None
+                and getattr(_sub.original_router, "prefix", "") == "/auth"
+            )
+        ]
+        for _si in reversed(_sub_indices):
+            _orig.routes.pop(_si)
+            _removed_count += 1
+
+    if _removed_count:
         logger.debug(
-            "Removed %d upstream auth route(s) for multi-user plugin override",
-            len(_to_remove),
+            "Removed %d upstream auth sub-router(s) for multi-user plugin override",
+            _removed_count,
         )
     # Invalidate cached OpenAPI schema
     app.openapi_schema = None
 
-    # Register a temporary /api/auth/status route so that the frontend
-    # auth guard does not hit a 404 during the brief window between
+    # Register temporary /api/auth/* routes so that the frontend auth
+    # guard and login page do not hit 404/405 during the window between
     # upstream route removal (here, at module level) and plugin route
     # registration (in _background_startup).  The plugin will replace
-    # this with its full-featured version once loaded.
-    from starlette.responses import JSONResponse as _JSONR
-    from starlette.routing import Route as _Route
-
+    # these with full-featured versions once loaded.
     async def _temp_auth_status(_request):
+        from starlette.responses import JSONResponse as _JSONR
         return _JSONR({"enabled": True, "has_users": False, "multi_user": True})
 
-    # Insert at the beginning so the plugin's version takes precedence
-    # once registered (FastAPI matches last-registered route first for
-    # same-path routes, but our plugin uses a separate include_router
-    # so it appends — we need the temp route to be findable during the gap).
-    app.router.routes.insert(
-        0, _Route("/api/auth/status", _temp_auth_status, methods=["GET"]),
+    async def _temp_auth_login(_request):
+        from starlette.responses import JSONResponse as _JSONR
+        return _JSONR(
+            {"detail": "Server is still starting up. Please try again shortly."},
+            status_code=503,
+        )
+
+    async def _temp_auth_catchall(_request):
+        from starlette.responses import JSONResponse as _JSONR
+        return _JSONR(
+            {"detail": "Server is still starting up. Please try again shortly."},
+            status_code=503,
+        )
+
+    app.add_api_route(
+        "/api/auth/status",
+        _temp_auth_status,
+        methods=["GET"],
+        tags=["auth"],
+        include_in_schema=False,
+    )
+    app.add_api_route(
+        "/api/auth/login",
+        _temp_auth_login,
+        methods=["POST"],
+        tags=["auth"],
+        include_in_schema=False,
+    )
+    # Catch-all for any other /api/auth/* endpoints that the plugin
+    # will register later (verify, resolve-user, init-workspace, etc.)
+    app.add_api_route(
+        "/api/auth/{path:path}",
+        _temp_auth_catchall,
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        tags=["auth"],
+        include_in_schema=False,
     )
 
 # Approval router: /api/approval/approve, /api/approval/deny, etc.
@@ -985,6 +1118,9 @@ app.include_router(approval_router, prefix="/api")
 
 # Coding Mode router: /api/coding-mode
 app.include_router(coding_mode_router, prefix="/api")
+
+# Loops router: /api/loops
+app.include_router(loops_router, prefix="/api")
 
 # Agent-scoped router: /api/agents/{agentId}/chats, etc.
 agent_scoped_router = create_agent_scoped_router()
