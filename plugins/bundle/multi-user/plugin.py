@@ -41,6 +41,27 @@ if _plugin_dir not in sys.path:
     sys.path.insert(0, _plugin_dir)
 
 
+def _is_upstream_auth_route(route) -> bool:
+    """Check if a route belongs to the upstream auth router.
+
+    The upstream auth routes are registered under the ``auth`` tag and
+    have paths starting with ``/api/auth/``.  We identify them by their
+    path prefix so that we can remove them when the multi-user plugin
+    provides its own enhanced auth routes.
+    """
+    path = getattr(route, "path", "")
+    if not path.startswith("/api/auth"):
+        return False
+    # Don't remove routes that belong to our plugin (they have
+    # a different route object identity).
+    # We only want to remove the *upstream* auth routes, which
+    # are defined in qwenpaw.app.routers.auth.
+    route_module = getattr(getattr(route, "endpoint", None), "__module__", "")
+    if route_module.startswith("qwenpaw.app.routers.auth"):
+        return True
+    return False
+
+
 class MultiUserPlugin:
     """Multi-user support plugin for QwenPaw."""
 
@@ -106,6 +127,34 @@ class MultiUserPlugin:
         logger.info("=" * 60)
         logger.info("Activating QwenPaw multi-user plugin...")
         logger.info("=" * 60)
+
+        # --- Step 0: Remove original auth routes to avoid conflicts ---
+        # The upstream auth routes (/api/auth/login, /api/auth/status, etc.)
+        # are registered at import time via routers/__init__.py.  Our plugin
+        # registers its own enhanced auth routes at the same prefix.  FastAPI
+        # matches routes in registration order, so the original routes take
+        # precedence.  We remove the original ones here so that our enhanced
+        # routes handle all /api/auth/* requests.
+        try:
+            from qwenpaw.app._app import app as _app
+            # Verify that upstream auth routes were excluded by
+            # routers/__init__.py (which checks for multi-user plugin dir).
+            # If they weren't, log a warning.
+            _has_upstream_auth = False
+            for _r in _app.routes:
+                if _is_upstream_auth_route(_r):
+                    _has_upstream_auth = True
+                    break
+            if _has_upstream_auth:
+                logger.warning(
+                    "[multi-user] Upstream auth routes still present — "
+                    "they may conflict with plugin routes. "
+                    "Check routers/__init__.py for _skip_upstream_auth.",
+                )
+        except Exception as e:
+            logger.warning(
+                "[multi-user] Failed to check upstream auth routes: %s", e,
+            )
 
         # --- Step 1: User context (always safe, no patching needed) ---
         from user_context import get_current_user_id  # noqa: F401

@@ -96,6 +96,7 @@ class DeleteUserRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+@router.post("/login/")
 @router.post("/login")
 async def login(request: Request, req: LoginRequest):
     """Authenticate with user fields and password.
@@ -103,71 +104,97 @@ async def login(request: Request, req: LoginRequest):
     Auto-registers if user does not exist.
     Includes rate limiting via upstream's LoginRateLimiter.
     """
-    from auth_extension import (
-        authenticate,
-        build_user_id,
-        is_auth_enabled,
-        register_user,
-        get_user_working_dir,
-    )
+    try:
+        from auth_extension import (
+            authenticate,
+            build_user_id,
+            is_auth_enabled,
+            register_user,
+            get_user_working_dir,
+        )
 
-    if not is_auth_enabled():
-        empty_resp = {"token": "", "user_id": ""}
+        if not is_auth_enabled():
+            empty_resp = {"token": "", "user_id": ""}
+            for field in USER_FIELDS:
+                empty_resp[field] = ""
+            return LoginResponse(**empty_resp)
+
+        # --- Rate limiting ---
+        # NOTE: Upstream v1.1.12 does not have qwenpaw.app.rate_limiter.
+        # We provide a simple in-memory login rate limiter as a fallback.
+        client_ip = request.client.host if request.client else "unknown"
+        username = getattr(req, USER_FIELDS[0], "") if USER_FIELDS else ""
+
+        # Try upstream rate_limiter first (may exist in future versions)
+        try:
+            from qwenpaw.app.rate_limiter import rate_limiter as _rl
+            if _rl.is_ip_limited(client_ip):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many login attempts from this IP. Try again later.",
+                )
+            if username and _rl.is_user_limited(username):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many login attempts for this user. Try again later.",
+                )
+            _record_fn = _rl.record_login_attempt
+        except ImportError:
+            # No upstream rate limiter — use simple local implementation
+            from _rate_limiter import is_ip_limited, is_user_limited, record_login_attempt
+            if is_ip_limited(client_ip):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many login attempts from this IP. Try again later.",
+                )
+            if username and is_user_limited(username):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many login attempts for this user. Try again later.",
+                )
+            _record_fn = record_login_attempt
+
+        stripped = {}
         for field in USER_FIELDS:
-            empty_resp[field] = ""
-        return LoginResponse(**empty_resp)
+            stripped[field] = getattr(req, field).strip()
 
-    # --- Rate limiting (reuse upstream LoginRateLimiter) ---
-    from qwenpaw.app.rate_limiter import rate_limiter
-
-    client_ip = request.client.host if request.client else "unknown"
-    username = getattr(req, USER_FIELDS[0], "") if USER_FIELDS else ""
-
-    if rate_limiter.is_ip_limited(client_ip):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many login attempts from this IP. Try again later.",
-        )
-    if username and rate_limiter.is_user_limited(username):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many login attempts for this user. Try again later.",
-        )
-
-    stripped = {}
-    for field in USER_FIELDS:
-        stripped[field] = getattr(req, field).strip()
-
-    token = authenticate(req.password, **stripped)
-    success = token is not None
-    if not success:
-        token = register_user(req.password, **stripped)
+        token = authenticate(req.password, **stripped)
         success = token is not None
         if not success:
-            rate_limiter.record_login_attempt(client_ip, username, False)
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+            token = register_user(req.password, **stripped)
+            success = token is not None
+            if not success:
+                _record_fn(client_ip, username, False)
+                raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    rate_limiter.record_login_attempt(client_ip, username, True)
+        _record_fn(client_ip, username, True)
 
-    user_id = build_user_id(**stripped)
+        user_id = build_user_id(**stripped)
 
-    # Initialize user workspace on login
-    try:
-        from migration_extension import ensure_user_default_agent_exists
+        # Initialize user workspace on login
+        try:
+            from migration_extension import ensure_user_default_agent_exists
+            ensure_user_default_agent_exists(user_id)
+        except Exception as exc:
+            logger.warning("Could not initialize workspace on login: %s", exc)
 
-        ensure_user_default_agent_exists(user_id)
-    except Exception as exc:
-        logger.warning("Could not initialize workspace on login: %s", exc)
+        from qwenpaw.config.context import set_current_workspace_dir
 
-    from qwenpaw.config.context import set_current_workspace_dir
+        user_dir = get_user_working_dir(user_id)
+        set_current_workspace_dir(user_dir)
 
-    user_dir = get_user_working_dir(user_id)
-    set_current_workspace_dir(user_dir)
+        resp_data = {"token": token, "user_id": user_id, **stripped}
+        return LoginResponse(**resp_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        logger.error("[multi-user] Login error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Login error: {e}")
 
-    resp_data = {"token": token, "user_id": user_id, **stripped}
-    return LoginResponse(**resp_data)
 
-
+@router.post("/init-workspace/")
 @router.post("/init-workspace")
 async def init_workspace(request: Request, req: InitWorkspaceRequest = None):
     """Initialize a user workspace without a password (integration mode)."""
@@ -228,6 +255,7 @@ async def init_workspace(request: Request, req: InitWorkspaceRequest = None):
     return InitWorkspaceResponse(**resp_data)
 
 
+@router.get("/status/")
 @router.get("/status")
 async def auth_status():
     """Check authentication and multi-user status."""
@@ -245,6 +273,7 @@ async def auth_status():
     )
 
 
+@router.get("/resolve-user/")
 @router.get("/resolve-user")
 async def resolve_user(request: Request):
     """Resolve user identity from upstream Authorization token."""
@@ -269,6 +298,7 @@ async def resolve_user(request: Request):
     return {"user_id": ""}
 
 
+@router.get("/verify/")
 @router.get("/verify")
 async def verify(request: Request):
     """Verify that the caller's Bearer token is still valid."""

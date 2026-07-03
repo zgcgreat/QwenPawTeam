@@ -51,6 +51,17 @@ class UserAwareProviderManager:
     # User path helpers
     # ------------------------------------------------------------------
 
+    def _resolve_current_user_id(self) -> str:
+        """Return the current user ID from the ContextVar, or 'default'."""
+        try:
+            from user_context import get_current_user_id
+            uid = get_current_user_id()
+            if uid:
+                return uid
+        except Exception:
+            pass
+        return "default"
+
     def _get_user_paths(self) -> tuple:
         """Return (root, builtin, custom, active_model) paths for current user."""
         try:
@@ -219,8 +230,17 @@ class UserAwareProviderManager:
         return await provider.get_info() if provider else None
 
     async def list_provider_info(self) -> List:
+        """List provider info, filtering custom providers per-user."""
         tasks = [self._apply_overlay(p).get_info() for p in self._real.builtin_providers.values()]
-        tasks += [self._apply_overlay(p).get_info() for p in self._real.custom_providers.values()]
+        # Only show custom providers that belong to the current user.
+        # Namespaced IDs follow the pattern "{user_id}__{original_id}".
+        current_user = self._resolve_current_user_id()
+        user_prefix = f"{current_user}__"
+        for pid, p in self._real.custom_providers.items():
+            # Show if: namespaced with current user's prefix, OR
+            # not namespaced at all (legacy providers from before this fix).
+            if pid.startswith(user_prefix) or "__" not in pid:
+                tasks.append(self._apply_overlay(p).get_info())
         import asyncio
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if not isinstance(r, Exception)]
@@ -342,7 +362,7 @@ class UserAwareProviderManager:
         To avoid cross-user visibility, we namespace the provider ID
         with the user's identity.
         """
-        user_id = self._get_user_id()
+        user_id = self._resolve_current_user_id()
         provider_payload = provider_data.model_dump()
         # Namespace the provider ID to avoid collisions and cross-user
         # visibility in the shared self._real.custom_providers dict.
@@ -361,17 +381,34 @@ class UserAwareProviderManager:
         return await provider.get_info()
 
     def remove_custom_provider(self, provider_id: str) -> bool:
-        """Remove a custom provider from both memory and user directory."""
-        if provider_id in self._real.custom_providers:
-            del self._real.custom_providers[provider_id]
+        """Remove a custom provider from both memory and user directory.
+
+        The provider_id from the frontend is the original (non-namespaced)
+        ID.  We need to look up the namespaced version in the registry.
+        """
+        # Try namespaced ID first (new providers created after the
+        # namespace fix), then fall back to original ID (legacy).
+        current_user = self._resolve_current_user_id()
+        namespaced_id = f"{current_user}__{provider_id}"
+        resolved_id = None
+        if namespaced_id in self._real.custom_providers:
+            resolved_id = namespaced_id
+        elif provider_id in self._real.custom_providers:
+            resolved_id = provider_id
+
+        if resolved_id and resolved_id in self._real.custom_providers:
+            del self._real.custom_providers[resolved_id]
             # Also remove from user directory
             _, _, custom_path, _ = self._get_user_paths()
-            provider_file = custom_path / f"{provider_id}.json"
-            if provider_file.exists():
-                try:
-                    os.remove(provider_file)
-                except OSError:
-                    pass
+            # The file may be saved under either the namespaced or
+            # original ID depending on when it was created.
+            for candidate in (resolved_id, provider_id):
+                provider_file = custom_path / f"{candidate}.json"
+                if provider_file.exists():
+                    try:
+                        os.remove(provider_file)
+                    except OSError:
+                        pass
             return True
         return False
 

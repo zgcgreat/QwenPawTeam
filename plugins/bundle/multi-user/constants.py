@@ -240,13 +240,22 @@ TOKEN_EXPIRY_SECONDS = 7 * 24 * 3600
 PUBLIC_PATHS: frozenset[str] = frozenset(
     {
         # Plugin auth endpoints (mounted under /api prefix, same as upstream)
+        # Both with and without trailing slashes are needed because the
+        # _mount_plugin_http_on_app route remount breaks FastAPI's
+        # redirect_slashes behavior for _IncludedRouter objects.
         "/api/auth/login",
+        "/api/auth/login/",
         "/api/auth/status",
+        "/api/auth/status/",
         "/api/auth/verify",
+        "/api/auth/verify/",
         "/api/auth/resolve-user",
+        "/api/auth/resolve-user/",
         "/api/auth/init-workspace",
+        "/api/auth/init-workspace/",
         # Upstream auth endpoints
         "/api/auth/register",
+        "/api/auth/register/",
         # Public app pages
         "/api/version",
         "/",

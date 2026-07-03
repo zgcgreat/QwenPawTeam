@@ -76,6 +76,10 @@ class UserAwareLogPath:
     # Support Path-like operations — use the user-resolved path
     # so that open(), os.fspath(), and str() all point to the
     # per-user log file, not the global one.
+    def _current(self) -> Path:
+        """Return the user-resolved path (same as resolve())."""
+        return self.resolve()
+
     def __str__(self) -> str:
         return str(self._current())
 

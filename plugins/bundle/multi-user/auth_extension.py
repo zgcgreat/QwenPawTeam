@@ -843,6 +843,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         from qwenpaw.app.agent_context import (
             set_current_user_id as _set_agent_ctx_user_id,
         )
+        set_current_user_id(None)
+        _set_agent_ctx_user_id(None)
 
         if self._should_skip_auth(request):
             # Still resolve user when multi-user is on

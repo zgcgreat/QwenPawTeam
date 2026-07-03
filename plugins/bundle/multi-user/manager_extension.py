@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,7 @@ class UserAwareMultiAgentManager:
                         default_ws = default_agents[agent_id]
                         # Ensure user has a config entry for this agent
                         # (use the default's config as template)
+                        from config_extension import get_user_working_dir, get_config_path
                         from qwenpaw.config.utils import save_config
                         from qwenpaw.config.config import AgentProfileRef
                         default_config = load_config(user_id="default")
@@ -150,9 +152,9 @@ class UserAwareMultiAgentManager:
                             workspace_dir=user_agent_dir,
                         )
                         config.agents.profiles[agent_id] = user_ref
-                        save_config(config, config_path=get_config_path())
+                        save_config(config, config_path=get_config_path(user_id=effective))
                         # Now recurse to create the actual Workspace
-                        return await self.get_agent(agent_id)
+                        return await self.get_agent(agent_id, user_id=effective)
 
                 raise ValueError(
                     f"Agent '{agent_id}' not found in config for "
