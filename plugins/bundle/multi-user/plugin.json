@@ -12,5 +12,6 @@
     "backend": "plugin.py"
   },
   "min_version": "1.1.5",
+  "max_version": "3.0.0",
   "type": "hook"
 }
