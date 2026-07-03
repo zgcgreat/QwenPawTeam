@@ -115,17 +115,44 @@ class UserAwareMultiAgentManager:
             config = load_config(user_id=effective)
 
             if agent_id not in config.agents.profiles:
-                # Step 3: Fallback to "default" user's cache only if the
-                # current user has NO config for this agent_id.
+                # The current user's config doesn't contain this agent_id.
+                # Instead of returning a shared default Workspace instance
+                # (which would leak data between users), create a new
+                # Workspace for the current user with the default user's
+                # agent config as a template.
                 if effective != "default":
                     default_agents = self._users.get("default", {})
                     if agent_id in default_agents:
                         logger.info(
-                            "[multi-user/manager] get_agent fallback: "
-                            "agent_id=%s not in user '%s' config, using shared default",
+                            "[multi-user/manager] get_agent: "
+                            "agent_id=%s not in user '%s' config, "
+                            "creating isolated workspace from default template",
                             agent_id, effective,
                         )
-                        return default_agents[agent_id]
+                        # Copy the default user's agent config to this user
+                        # so the new workspace gets the same settings but
+                        # runs in its own isolated directory.
+                        default_ws = default_agents[agent_id]
+                        # Ensure user has a config entry for this agent
+                        # (use the default's config as template)
+                        from qwenpaw.config.utils import save_config
+                        from qwenpaw.config.config import AgentProfileRef
+                        default_config = load_config(user_id="default")
+                        default_ref = default_config.agents.profiles[agent_id]
+                        # Create a user-specific agent ref pointing to the
+                        # user's own workspace dir
+                        user_dir = get_user_working_dir(effective)
+                        user_agent_dir = str(
+                            Path(user_dir) / "workspaces" / agent_id
+                        )
+                        user_ref = AgentProfileRef(
+                            enabled=default_ref.enabled,
+                            workspace_dir=user_agent_dir,
+                        )
+                        config.agents.profiles[agent_id] = user_ref
+                        save_config(config, config_path=get_config_path())
+                        # Now recurse to create the actual Workspace
+                        return await self.get_agent(agent_id)
 
                 raise ValueError(
                     f"Agent '{agent_id}' not found in config for "
@@ -138,14 +165,22 @@ class UserAwareMultiAgentManager:
             # Delegate to WorkspaceRegistry._create_workspace() so that
             # bootstrap_plugins_kwargs and app_services are injected
             # correctly, rather than constructing Workspace() directly.
-            from qwenpaw.app.workspace_registry import WorkspaceRegistry
-
-            workspace_registry = getattr(
-                getattr(self._real, 'app_services', None),
-                '_workspace_registry', None,
-            ) or (
-                isinstance(self._real, WorkspaceRegistry) and self._real
-            )
+            # NOTE: WorkspaceRegistry only exists in upstream v2.0+.
+            # In v1.1.12, we fall back to direct Workspace() construction.
+            workspace_registry = None
+            try:
+                from qwenpaw.app.workspace_registry import WorkspaceRegistry
+                workspace_registry = getattr(
+                    getattr(self._real, 'app_services', None),
+                    '_workspace_registry', None,
+                ) or (
+                    isinstance(self._real, WorkspaceRegistry) and self._real
+                )
+            except ImportError:
+                logger.debug(
+                    "[multi-user/manager] workspace_registry not available "
+                    "(upstream < v2.0), using direct Workspace construction"
+                )
 
             if workspace_registry is not None:
                 instance = workspace_registry._create_workspace(
@@ -153,9 +188,9 @@ class UserAwareMultiAgentManager:
                     workspace_dir=agent_ref.workspace_dir,
                 )
             else:
-                # Fallback: no WorkspaceRegistry available (shouldn't happen in
-                # normal operation, but covers edge cases during early startup).
-                from qwenpaw.app.workspace import Workspace
+                # Fallback: no WorkspaceRegistry available (v1.1.12 or
+                # edge cases during early startup).
+                from qwenpaw.app.workspace.workspace import Workspace
 
                 instance = Workspace(
                     agent_id=agent_id,

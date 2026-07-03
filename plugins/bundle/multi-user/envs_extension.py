@@ -42,16 +42,23 @@ _original_delete_env_var = None
 def get_user_secret_dir(user_id: str) -> Path:
     """Return the secret directory for a specific user.
 
+    Delegates to auth_extension.get_user_secret_dir() so that
+    composite user IDs (e.g. "org/dept/user") are correctly
+    expanded into nested directory paths, consistent with the
+    auth module's behavior.
+
     Args:
         user_id: Composite user identifier.
 
     Returns:
-        Path: ``{SECRET_DIR}/users/{user_id}/``
-        e.g. ``~/.qwenpaw.secret/users/{user_id}/``
+        Path: ``{SECRET_DIR}/users/{field1}/{field2}/.../``
+        e.g. ``~/.qwenpaw.secret/users/org/dept/user/``
     """
     if not user_id or user_id == "default":
         return SECRET_DIR
-    return SECRET_DIR / "users" / user_id
+    # Use auth_extension's version which handles composite IDs correctly
+    from auth_extension import get_user_secret_dir as _auth_get_user_secret_dir
+    return _auth_get_user_secret_dir(user_id)
 
 
 def get_user_envs_json_path(user_id: Optional[str] = None) -> Path:

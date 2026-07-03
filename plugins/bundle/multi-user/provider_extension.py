@@ -335,12 +335,24 @@ class UserAwareProviderManager:
     # --- Custom providers (user-aware) ---
 
     async def add_custom_provider(self, provider_data):
-        """Add a custom provider, persisted to the user directory."""
+        """Add a custom provider, persisted to the user directory.
+
+        The provider is stored in the per-user directory and only loaded
+        into the in-memory registry for the current user's requests.
+        To avoid cross-user visibility, we namespace the provider ID
+        with the user's identity.
+        """
+        user_id = self._get_user_id()
         provider_payload = provider_data.model_dump()
+        # Namespace the provider ID to avoid collisions and cross-user
+        # visibility in the shared self._real.custom_providers dict.
+        namespaced_id = f"{user_id}__{provider_data.id}"
         provider_payload["id"] = self._real._resolve_custom_provider_id(
-            provider_data.id,
+            namespaced_id,
         )
         provider_payload["is_custom"] = True
+        # Store original ID for display purposes
+        provider_payload["_original_id"] = provider_data.id
         provider = self._real._provider_from_data(provider_payload)
         provider.support_connection_check = False
         self._real.custom_providers[provider.id] = provider

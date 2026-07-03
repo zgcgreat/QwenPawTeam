@@ -837,6 +837,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process request with multi-user routing."""
+        # Always clear ContextVar at the start of each request to prevent
+        # user_id leakage from a previous request on the same async context.
+        from user_context import set_current_user_id
+        from qwenpaw.app.agent_context import (
+            set_current_user_id as _set_agent_ctx_user_id,
+        )
+
         if self._should_skip_auth(request):
             # Still resolve user when multi-user is on
             if is_multi_user_enabled():
@@ -851,6 +858,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     from user_context import set_current_user_id
 
                     set_current_user_id(user_id)
+
+                    # Also set the upstream agent_context ContextVar so that
+                    # ContextVarsSetupHook and other v2.0 code paths see the
+                    # correct user_id.  Without this, the two modules maintain
+                    # independent ContextVar instances and upstream code would
+                    # see None instead of the authenticated user.
+                    from qwenpaw.app.agent_context import (
+                        set_current_user_id as _set_agent_ctx_user_id,
+                    )
+                    _set_agent_ctx_user_id(user_id)
 
                     from qwenpaw.config.context import set_current_workspace_dir
 
@@ -885,6 +902,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         from user_context import set_current_user_id
 
         set_current_user_id(user_id)
+
+        # Also set the upstream agent_context ContextVar so that
+        # ContextVarsSetupHook and other v2.0 code paths see the
+        # correct user_id.
+        from qwenpaw.app.agent_context import (
+            set_current_user_id as _set_agent_ctx_user_id,
+        )
+        _set_agent_ctx_user_id(user_id)
 
         from qwenpaw.config.context import set_current_workspace_dir
 
