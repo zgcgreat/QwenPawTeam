@@ -380,15 +380,6 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
     AgentBuilder.build_toolkit() for tools and register a prompt section
     via PluginRegistry for the system prompt supplement.
     """
-    try:
-        from qwenpaw.agents.react_agent import QwenPawAgent
-    except ImportError as exc:
-        logger.error(
-            "Cannot import QwenPawAgent; tool/prompt hooks skipped: %s",
-            exc,
-        )
-        return
-
     # ---- Tool injection via AgentBuilder.build_toolkit() ----
     try:
         from qwenpaw.runtime.builder import AgentBuilder
@@ -474,28 +465,13 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
     # ---- Prompt supplement via PluginRegistry.register_prompt_section() ----
     _register_cloudpaw_prompt_section()
 
-    # ---- Interrupt patch (still works in v2.0) ----
-    _original_interrupt = QwenPawAgent.interrupt
+    # Note: The old QwenPawAgent.interrupt patch for cancelling async tasks
+    # (e.g. delegate_external_agent) is removed in v2.0 — the Runtime's tool
+    # coordinator handles async tool cancellation natively via TaskTracker.
 
-    async def _patched_interrupt(self, msg=None):
-        """Cancel async tasks on stop (e.g. delegate_external_agent)."""
-        toolkit = getattr(self, "toolkit", None)
-        if toolkit is not None:
-            async_tasks = getattr(toolkit, "_async_tasks", {})
-            for task_id, task in list(async_tasks.items()):
-                if not task.done():
-                    task.cancel()
-                    logger.info(
-                        "[CloudPaw] Cancelled background async task %s "
-                        "during interrupt",
-                        task_id,
-                    )
-        await _original_interrupt(self, msg)
-
-    QwenPawAgent.interrupt = _patched_interrupt
     logger.info(
         "[CloudPaw] Patched AgentBuilder.build_toolkit with cloudpaw tools, "
-        "registered prompt section, and interrupt",
+        "and registered prompt section",
     )
 
     _setup_a2a_query_rewrite()
@@ -781,23 +757,24 @@ def _patch_stream_task_timeout() -> None:
     """Increase stream_task_timeout so long-running agent tasks
     (e.g. ROS CreateStack + polling) are not cancelled prematurely.
 
-    The default is 300s (5 min) which is too short for cloud resource
-    provisioning workflows that can take 10+ minutes.
+    In v2.0, the timeout is managed by the Runtime's stream config
+    rather than a global agent_app variable.  We set the timeout via
+    the application state instead.
     """
     try:
-        from qwenpaw.app._app import agent_app
+        from qwenpaw.app._app import app
 
-        old = agent_app.stream_task_timeout
-        agent_app.stream_task_timeout = _CLOUDPAW_STREAM_TASK_TIMEOUT
-        logger.info(
-            "[CloudPaw] Patched stream_task_timeout: %s -> %s",
-            old,
-            _CLOUDPAW_STREAM_TASK_TIMEOUT,
-        )
-    except (ImportError, AttributeError) as exc:
-        logger.warning(
-            "Failed to patch stream_task_timeout: %s",
-            exc,
+        if hasattr(app.state, "stream_task_timeout"):
+            old = app.state.stream_task_timeout
+            app.state.stream_task_timeout = _CLOUDPAW_STREAM_TASK_TIMEOUT
+            logger.info(
+                "[CloudPaw] Patched stream_task_timeout: %s -> %s",
+                old,
+                _CLOUDPAW_STREAM_TASK_TIMEOUT,
+            )
+    except Exception:
+        logger.debug(
+            "[CloudPaw] stream_task_timeout not available in v2.0",
         )
 
 
