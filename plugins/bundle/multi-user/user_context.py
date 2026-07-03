@@ -27,7 +27,7 @@ In any downstream code that needs the user::
 """
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from typing import Optional
 
 # ---------------------------------------------------------------------------
@@ -68,3 +68,79 @@ def get_current_user_id() -> str:
 def clear_current_user_id() -> None:
     """Clear the user context (useful between test cases)."""
     _current_user_id.set(None)
+
+
+# ---------------------------------------------------------------------------
+# Context-propagating run_in_executor patch
+# ---------------------------------------------------------------------------
+
+_original_run_in_executor = None
+
+
+def _context_aware_run_in_executor(self, executor, func, *args):
+    """Wrap run_in_executor to propagate ContextVars into the thread pool.
+
+    Standard ``loop.run_in_executor()`` does NOT copy the current
+    ContextVar context into the worker thread — unlike
+    ``asyncio.to_thread()`` which does (PEP 567).  This means any
+    code running inside ``run_in_executor`` (e.g. backup operations,
+    coding mode config loading, browser control) would see
+    ``_current_user_id`` as ``None`` and fall back to the default
+    user — a cross-user data leak.
+
+    This patch wraps the callable so it runs inside
+    ``copy_context().run()``, which captures all ContextVars at the
+    call site and replays them in the worker thread.
+    """
+    ctx = copy_context()
+    # Return a coroutine that yields to the original run_in_executor
+    # with a context-wrapped function
+    return _original_run_in_executor(
+        self, executor, lambda: ctx.run(func, *args),
+    )
+
+
+def patch_run_in_executor() -> None:
+    """Monkey-patch asyncio event loop's run_in_executor to propagate ContextVars.
+
+    This is called once during plugin startup.  It ensures that all
+    upstream code using ``loop.run_in_executor()`` (which does NOT
+    propagate ContextVars) behaves the same as ``asyncio.to_thread()``
+    (which does).
+
+    The patch is applied to ``asyncio.AbstractEventLoop.run_in_executor``
+    so it affects all event loop implementations (Selector, Proactor, uvloop).
+    """
+    global _original_run_in_executor
+
+    import asyncio
+
+    if _original_run_in_executor is not None:
+        return  # Already patched (idempotent)
+
+    _original_run_in_executor = asyncio.AbstractEventLoop.run_in_executor
+    asyncio.AbstractEventLoop.run_in_executor = _context_aware_run_in_executor
+
+    import logging
+    logging.getLogger(__name__).info(
+        "[multi-user] Patched asyncio.AbstractEventLoop.run_in_executor "
+        "to propagate ContextVars into thread pool workers"
+    )
+
+
+def unpatch_run_in_executor() -> None:
+    """Restore the original run_in_executor (for testing / shutdown)."""
+    global _original_run_in_executor
+
+    if _original_run_in_executor is None:
+        return
+
+    import asyncio
+
+    asyncio.AbstractEventLoop.run_in_executor = _original_run_in_executor
+    _original_run_in_executor = None
+
+    import logging
+    logging.getLogger(__name__).info(
+        "[multi-user] Restored original run_in_executor"
+    )

@@ -105,8 +105,19 @@ def parse_user_id(user_id: str) -> Dict[str, str]:
 
 
 def _sanitize_path_segment(segment: str) -> str:
-    """Sanitize a path segment to prevent path traversal."""
-    return "".join(c for c in segment if c.isalnum() or c in ("-", "_", "."))
+    """Sanitize a path segment to prevent path traversal.
+
+    Only allows alphanumeric characters, hyphens, underscores, and
+    non-adjacent dots.  Rejects ``..`` sequences, leading/trailing
+    dots, and empty results.
+    """
+    cleaned = "".join(c for c in segment if c.isalnum() or c in ("-", "_", "."))
+    # Reject dot-dot traversal
+    if ".." in cleaned:
+        cleaned = cleaned.replace("..", ".")
+    # Strip leading/trailing dots and hyphens
+    cleaned = cleaned.strip(".-")
+    return cleaned or "user"
 
 
 # ===================================================================
@@ -206,6 +217,14 @@ def verify_token(token: str) -> Optional[str]:
         if jti and _is_token_revoked(jti):
             return None
 
+        # Check if the user's tokens were revoked due to password change
+        user_id = payload.get("sub")
+        token_exp = payload.get("exp", 0)
+        if user_id:
+            data = _load_auth_data()
+            if _is_user_token_revoked(data, user_id, token_exp):
+                return None
+
         return payload.get("sub")
     except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
         logger.debug("Token verification failed: %s", exc)
@@ -257,7 +276,10 @@ def _load_auth_data() -> dict:
             return data
         except (json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to load auth file %s: %s", AUTH_FILE, exc)
-            return {"_auth_load_error": True}
+            # Return fail-closed state: empty users dict but with
+            # error flag so has_registered_users() returns True
+            # (preventing _should_skip_auth from disabling auth).
+            return {"_auth_load_error": True, "users": {}}
     return {}
 
 
@@ -281,8 +303,24 @@ def _save_auth_data(data: dict) -> None:
         pass
 
     encrypted_data = encrypt_dict_fields(data, AUTH_SECRET_FIELDS)
-    with open(AUTH_FILE, "w", encoding="utf-8") as f:
-        json.dump(encrypted_data, f, indent=2, ensure_ascii=False)
+    # Atomic write: write to temp file first, then rename.
+    # This prevents corruption if the process crashes mid-write.
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=str(AUTH_FILE.parent), suffix=".tmp", prefix="auth_",
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(encrypted_data, f, indent=2, ensure_ascii=False)
+        # Atomic rename (POSIX) or best-effort on Windows
+        os.replace(tmp_path, AUTH_FILE)
+    except Exception:
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     try:
         os.chmod(AUTH_FILE, 0o600)
     except OSError:
@@ -752,7 +790,10 @@ def update_credentials(
         pw_hash, salt = _hash_password(new_password)
         user["password_hash"] = pw_hash
         user["password_salt"] = salt
-        data["jwt_secret"] = secrets.token_hex(32)
+        # Per-user token invalidation: add the user's current tokens
+        # to the revocation list instead of rotating the global JWT
+        # secret (which would invalidate ALL users' tokens).
+        _revoke_user_tokens(data, user_id)
 
     users[user_id] = user
     data["users"] = users
@@ -760,16 +801,91 @@ def update_credentials(
     return create_token(user_id, expiry_seconds=expiry_seconds)
 
 
+def _revoke_user_tokens(data: dict, user_id: str) -> None:
+    """Add all current tokens for a specific user to the revocation list.
+
+    Unlike rotating the global JWT secret (which invalidates ALL users),
+    this only invalidates the specified user's tokens.
+    """
+    revoked = data.setdefault("revoked_tokens", {})
+    user_tokens = revoked.setdefault(user_id, [])
+    # Add a blanket revocation entry for this user with current timestamp
+    import time
+    user_tokens.append({
+        "revoked_at": int(time.time()),
+        "reason": "password_change",
+    })
+    # Clean up old revocations (>30 days)
+    cutoff = int(time.time()) - 30 * 86400
+    data["revoked_tokens"] = {
+        uid: [r for r in tokens if r.get("revoked_at", 0) > cutoff]
+        for uid, tokens in revoked.items()
+        if any(r.get("revoked_at", 0) > cutoff for r in tokens)
+    }
+
+
+def _is_user_token_revoked(data: dict, user_id: str, token_exp: int) -> bool:
+    """Check if a user's token issued before a password change is revoked."""
+    revoked = data.get("revoked_tokens", {})
+    user_revocations = revoked.get(user_id, [])
+    for rev in user_revocations:
+        # If the token was issued before the revocation time, it's revoked
+        if token_exp <= rev.get("revoked_at", 0):
+            return True
+    return False
+
+
+def _get_admin_user_id(data: dict) -> Optional[str]:
+    """Return the admin user ID (first registered user or env-registered user).
+
+    The admin is determined by checking for the auto-registered user
+    first, then falling back to the first user in the dict.
+    """
+    users = data.get("users", {})
+    if not users:
+        return None
+    # Check for env-registered admin user
+    env_admin = os.environ.get("QWENPAW_AUTH_USERNAME", "").strip()
+    if env_admin:
+        admin_id = build_user_id(username=env_admin)
+        if admin_id in users:
+            return admin_id
+    # Fallback: first registered user is admin
+    return next(iter(users))
+
+
 def delete_user(user_id: str, admin_user_id: str) -> bool:
-    """Delete a user account (admin only)."""
+    """Delete a user account (admin only).
+
+    Only the auto-registered admin user (from QWENPAW_AUTH_USERNAME)
+    or the first registered user can delete other users.
+    A user cannot delete themselves through this function.
+    """
     data = _load_auth_data()
     users = data.get("users", {})
 
     if user_id not in users:
         return False
 
+    # Prevent self-deletion
+    if user_id == admin_user_id:
+        logger.warning("User '%s' cannot delete themselves", admin_user_id)
+        return False
+
     if len(users) <= 1:
         logger.warning("Cannot delete last user '%s'", user_id)
+        return False
+
+    # Authorization check: only the first registered user (admin)
+    # or the auto-registered user can delete others.
+    # The "admin" is the user whose user_id matches the first key
+    # in the users dict (or the env-registered user).
+    admin_user = _get_admin_user_id(data)
+    if admin_user_id != admin_user:
+        logger.warning(
+            "User '%s' is not admin; cannot delete user '%s'",
+            admin_user_id, user_id,
+        )
         return False
 
     del users[user_id]
@@ -853,28 +969,66 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 if token:
                     from token_parser import parse_token_to_user_id
 
-                    user_id = parse_token_to_user_id(token) or "default"
-                    request.state.user = user_id
-                    request.state.user_id = user_id
+                    user_id = parse_token_to_user_id(token)
+                    if user_id:
+                        request.state.user = user_id
+                        request.state.user_id = user_id
 
-                    from user_context import set_current_user_id
+                        from user_context import set_current_user_id
 
-                    set_current_user_id(user_id)
+                        set_current_user_id(user_id)
 
-                    # Also set the upstream agent_context ContextVar so that
-                    # ContextVarsSetupHook and other v2.0 code paths see the
-                    # correct user_id.  Without this, the two modules maintain
-                    # independent ContextVar instances and upstream code would
-                    # see None instead of the authenticated user.
-                    from qwenpaw.app.agent_context import (
-                        set_current_user_id as _set_agent_ctx_user_id,
+                        # Also set the upstream agent_context ContextVar so that
+                        # ContextVarsSetupHook and other v2.0 code paths see the
+                        # correct user_id.  Without this, the two modules maintain
+                        # independent ContextVar instances and upstream code would
+                        # see None instead of the authenticated user.
+                        from qwenpaw.app.agent_context import (
+                            set_current_user_id as _set_agent_ctx_user_id,
+                        )
+                        _set_agent_ctx_user_id(user_id)
+
+                        from qwenpaw.config.context import set_current_workspace_dir
+
+                        user_dir = get_user_working_dir(user_id)
+                        set_current_workspace_dir(user_dir)
+                    else:
+                        # S1 fix: Integration mode with multi-user enabled but
+                        # token could not be parsed to a user identity.  This
+                        # means the upstream gateway sent a token we can't
+                        # resolve.  In multi-user mode we MUST NOT fall through
+                        # to "default" — that would let unauthenticated requests
+                        # access the default user's data.  Return 401 instead.
+                        return Response(
+                            content=json.dumps({
+                                "detail": "Cannot resolve user identity from token. "
+                                "Ensure the upstream gateway provides a valid token "
+                                "with user identity claims.",
+                            }),
+                            status_code=401,
+                            media_type="application/json",
+                        )
+                else:
+                    # S1 fix: No token at all in integration mode with
+                    # multi-user enabled.  Refuse the request rather than
+                    # falling through to the default user.  However, we
+                    # still allow public paths (STATIC, DOCS, etc.) to
+                    # pass through — those are not user-scoped.
+                    path = request.url.path
+                    is_public = (
+                        path in PUBLIC_PATHS
+                        or any(path.startswith(p) for p in PUBLIC_PREFIXES)
+                        or not path.startswith("/api/")
                     )
-                    _set_agent_ctx_user_id(user_id)
-
-                    from qwenpaw.config.context import set_current_workspace_dir
-
-                    user_dir = get_user_working_dir(user_id)
-                    set_current_workspace_dir(user_dir)
+                    if not is_public:
+                        return Response(
+                            content=json.dumps({
+                                "detail": "Authentication required in multi-user mode. "
+                                "Provide a valid upstream gateway token.",
+                            }),
+                            status_code=401,
+                            media_type="application/json",
+                        )
 
                 # Propagate X-Agent-Id to ContextVar so that
                 # token_usage and agent_stats can resolve per-agent paths.
@@ -974,13 +1128,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 def _resolve_client_ip(request: Request) -> str:
-    """Return the real client IP, respecting reverse-proxy headers."""
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip", "")
-    if real_ip:
-        return real_ip.strip()
+    """Return the real client IP.
+
+    Only trusts X-Forwarded-For / X-Real-IP headers if the
+    QWENPAW_TRUST_PROXY_HEADERS env var is set to 'true'.
+    Otherwise, uses the direct connection IP from request.client
+    to prevent header forgery attacks.
+    """
+    trust_proxy = os.environ.get("QWENPAW_TRUST_PROXY_HEADERS", "").lower() == "true"
+    if trust_proxy:
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip", "")
+        if real_ip:
+            return real_ip.strip()
+    # Default: use direct connection IP (safe against header forgery)
     return request.client.host if request.client else ""
 
 

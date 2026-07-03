@@ -68,6 +68,13 @@ def get_user_working_dir(user_id: str) -> Path:
     """
     if not user_id or user_id == "default":
         return WORKING_DIR
+    # Delegate to auth_extension which applies _sanitize_path_segment
+    # to prevent path traversal (e.g. ".." in user_id).
+    try:
+        from auth_extension import get_user_working_dir as _auth_get_dir
+        return _auth_get_dir(user_id)
+    except ImportError:
+        pass
     return get_user_base_dir() / user_id
 
 

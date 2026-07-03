@@ -128,7 +128,15 @@ class MultiUserPlugin:
         logger.info("Activating QwenPaw multi-user plugin...")
         logger.info("=" * 60)
 
-        # --- Step 0: Remove original auth routes to avoid conflicts ---
+        # --- Step 0: Patch run_in_executor to propagate ContextVars ---
+        # This MUST be done before any upstream code calls
+        # loop.run_in_executor(), so that UserAwarePath and other
+        # context-dependent code works correctly in thread pool workers.
+        from user_context import patch_run_in_executor
+        patch_run_in_executor()
+        logger.info("[multi-user] run_in_executor patched for ContextVar propagation")
+
+        # --- Step 0b: Remove original auth routes to avoid conflicts ---
         # The upstream auth routes (/api/auth/login, /api/auth/status, etc.)
         # are registered at import time via routers/__init__.py.  Our plugin
         # registers its own enhanced auth routes at the same prefix.  FastAPI
@@ -190,6 +198,13 @@ class MultiUserPlugin:
         patch_backup_router()
         logger.info("[multi-user] Backup router patched")
 
+        # --- Step 2g: Cron/heartbeat extension ---
+        # Ensures cron/heartbeat tasks set the user ContextVar so
+        # that config/envs/path resolution works correctly.
+        from cron_extension import patch_cron_executor
+        patch_cron_executor()
+        logger.info("[multi-user] Cron/heartbeat executor patched")
+
         # --- Step 3: Auth extension was already patched in register() ---
 
         # --- Step 4: Wrap managers ---
@@ -222,6 +237,13 @@ class MultiUserPlugin:
         logger.info("[multi-user] Shutting down multi-user plugin...")
 
         try:
+            from user_context import unpatch_run_in_executor
+            unpatch_run_in_executor()
+            logger.info("[multi-user] run_in_executor unpatched")
+        except Exception as e:
+            logger.warning("[multi-user] Failed to unpatch run_in_executor: %s", e)
+
+        try:
             from token_usage_extension import unpatch_token_usage_manager
             unpatch_token_usage_manager()
             logger.info("[multi-user] Token usage manager unpatched")
@@ -241,6 +263,13 @@ class MultiUserPlugin:
             logger.info("[multi-user] Backup router unpatched")
         except Exception as e:
             logger.warning("[multi-user] Failed to unpatch backup router: %s", e)
+
+        try:
+            from cron_extension import unpatch_cron_executor
+            unpatch_cron_executor()
+            logger.info("[multi-user] Cron/heartbeat executor unpatched")
+        except Exception as e:
+            logger.warning("[multi-user] Failed to unpatch cron executor: %s", e)
 
         logger.info("[multi-user] Multi-user plugin shutdown complete")
 

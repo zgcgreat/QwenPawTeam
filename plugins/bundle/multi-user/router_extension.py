@@ -412,12 +412,14 @@ class RevokeTokenRequest(BaseModel):
 
 
 @router.post("/revoke-token")
-async def revoke_token_endpoint(req: RevokeTokenRequest) -> dict:
+async def revoke_token_endpoint(req: RevokeTokenRequest, request: Request) -> dict:
     """Revoke a single token by adding its jti to the blacklist.
 
     This replaces the upstream ``/api/auth/revoke-token`` endpoint that
     was removed during multi-user route override in ``_app.py``.
+    Requires authentication.
     """
+    _require_auth(request)
     from auth_extension import revoke_token as _revoke_token
 
     success = _revoke_token(req.token)
@@ -427,12 +429,21 @@ async def revoke_token_endpoint(req: RevokeTokenRequest) -> dict:
 
 
 @router.post("/revoke-all-tokens")
-async def revoke_all_tokens_endpoint() -> dict:
+async def revoke_all_tokens_endpoint(request: Request) -> dict:
     """Revoke all existing tokens by rotating the JWT secret.
 
     This replaces the upstream ``/api/auth/revoke-all-tokens`` endpoint
     that was removed during multi-user route override in ``_app.py``.
+    Requires authentication (admin only).
     """
+    caller_user_id = _require_auth(request)
+    # Only admin can revoke all tokens
+    from auth_extension import _get_admin_user_id, _load_auth_data
+    data = _load_auth_data()
+    admin_id = _get_admin_user_id(data)
+    if admin_id and caller_user_id != admin_id:
+        raise HTTPException(status_code=403, detail="Only admin can revoke all tokens")
+
     from auth_extension import revoke_all_tokens as _revoke_all_tokens
 
     success = _revoke_all_tokens()

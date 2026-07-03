@@ -63,9 +63,16 @@ def _resolve_user_id() -> Optional[str]:
 
 
 def _get_user_backup_dir(user_id: str) -> Path:
-    """Return the backup directory for *user_id*."""
+    """Return the backup directory for *user_id*.
+
+    Uses auth_extension.get_user_working_dir for safe path resolution
+    to prevent path traversal attacks.
+    """
     from qwenpaw.constant import BACKUP_DIR
-    d = BACKUP_DIR / "users" / user_id
+    # Sanitize user_id to prevent path traversal
+    from auth_extension import _sanitize_path_segment
+    safe_id = _sanitize_path_segment(user_id) if user_id and user_id != "default" else user_id
+    d = BACKUP_DIR / "users" / safe_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
