@@ -33,8 +33,77 @@ def _mount_plugin_http_on_app(
     full_path_prefix: str,
     tags: Optional[List[Any]],
 ) -> List[Any]:
-    """Include *router* on *app* so it matches before the console SPA route."""
+    """Include *router* on *app* so it matches before the console SPA route.
+
+    Any previously-registered routes whose path is also covered by the
+    new router are removed first, so the plugin's version takes
+    precedence (FastAPI matches routes in list order, first match wins).
+    This handles the case where temporary placeholder routes (e.g.
+    ``/api/auth/login``) were registered at module-import time and must
+    be replaced by the real plugin routes during background startup.
+    """
     routes = app.router.routes
+
+    # Collect (path, methods) from the incoming router so we can detect
+    # and evict shadowed placeholder routes.
+    _new_paths: Dict[str, set] = {}  # path -> set of methods
+    for _r in router.routes:
+        _p = getattr(_r, "path", "")
+        if not _p:
+            # _IncludedRouter — treat as a prefix match instead
+            _sub_prefix = getattr(
+                getattr(_r, "original_router", None), "prefix", "",
+            )
+            if _sub_prefix:
+                _full = full_path_prefix + _sub_prefix
+                _new_paths[_full] = set()  # prefix catch-all
+            continue
+        _full_path = full_path_prefix + _p
+        _methods = getattr(_r, "methods", None) or set()
+        _new_paths.setdefault(_full_path, set()).update(_methods)
+
+    # Remove existing routes that are shadowed by the new router.
+    # We also remove catch-all placeholders (path like /api/auth/{path:path})
+    # when the new router covers the prefix.
+    _removed_placeholders: list = []
+    _indices_to_remove: list = []
+    for _i, _existing in enumerate(routes):
+        _ep = getattr(_existing, "path", "")
+        _em = getattr(_existing, "methods", None) or set()
+        _include_in_schema = getattr(_existing, "include_in_schema", True)
+        # Only consider removing routes that are not in the schema
+        # (i.e. temporary/placeholder routes).
+        if _include_in_schema:
+            continue
+        # Check exact path match with method overlap
+        if _ep in _new_paths:
+            _new_methods = _new_paths[_ep]
+            # If new route covers all methods, or methods overlap, remove
+            if not _new_methods or _em & _new_methods:
+                _indices_to_remove.append(_i)
+                _removed_placeholders.append(_ep)
+                continue
+        # Check if this is a catch-all placeholder under a prefix that
+        # the new router covers (e.g. /api/auth/{path:path} shadowed
+        # by routes under /api/auth/*).
+        if "{path:path}" in _ep:
+            _prefix = _ep.split("{path:path}")[0]
+            for _np in _new_paths:
+                if _np.startswith(_prefix):
+                    _indices_to_remove.append(_i)
+                    _removed_placeholders.append(_ep)
+                    break
+
+    for _i in reversed(_indices_to_remove):
+        routes.pop(_i)
+
+    if _removed_placeholders:
+        logger.info(
+            "Removed %d placeholder route(s) shadowed by plugin: %s",
+            len(_removed_placeholders),
+            _removed_placeholders,
+        )
+
     spa_idx = _find_console_spa_route_index(app)
     n_before = len(routes)
     app.include_router(router, prefix=full_path_prefix, tags=tags)
@@ -149,6 +218,7 @@ class PluginRegistry:  # pylint:disable=too-many-public-methods
         self._http_prefix_to_plugin: Dict[str, str] = {}
         self._prompt_sections: List[PromptSectionRegistration] = []
         self._prompt_section_names: set = set()
+        self._workspace_manager: Optional[Any] = None
 
         self._initialized = True
 
@@ -384,6 +454,25 @@ class PluginRegistry:  # pylint:disable=too-many-public-methods
             RuntimeHelpers instance or None
         """
         return self._runtime_helpers
+
+    def set_workspace_manager(self, manager) -> None:
+        """Set the workspace manager reference.
+
+        The workspace manager is used by plugin features that need
+        to iterate or inspect active workspaces (e.g. loop discovery).
+
+        Args:
+            manager: Workspace manager instance (WorkspaceRegistry or compatible)
+        """
+        self._workspace_manager = manager
+
+    def get_workspace_manager(self):
+        """Get the workspace manager reference.
+
+        Returns:
+            Workspace manager instance or None
+        """
+        return self._workspace_manager
 
     def register_startup_hook(
         self,
