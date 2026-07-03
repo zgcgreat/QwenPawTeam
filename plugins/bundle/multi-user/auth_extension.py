@@ -273,6 +273,29 @@ def _load_auth_data() -> dict:
                     "auth.json contains plaintext secret fields; "
                     "will be re-encrypted on next save."
                 )
+
+            # --- Migration: fix corrupted revoked_tokens ---
+            # A previous bug in _revoke_user_tokens() could turn
+            # revoked_tokens from a list (of jti strings) into a dict
+            # (of {user_id: [{revoked_at, reason}]}).  If we detect
+            # this, migrate the per-user data to revoked_users and
+            # restore revoked_tokens to a list.
+            if isinstance(data.get("revoked_tokens"), dict):
+                logger.warning(
+                    "Migrating corrupted revoked_tokens (dict) to revoked_users"
+                )
+                # Move per-user revocation data to the correct key
+                existing = data.get("revoked_users", {})
+                if not isinstance(existing, dict):
+                    existing = {}
+                for uid, entries in data["revoked_tokens"].items():
+                    if isinstance(entries, list):
+                        existing.setdefault(uid, []).extend(entries)
+                data["revoked_users"] = existing
+                # Restore revoked_tokens to a list (individual jtis are
+                # tracked in revoked_tokens_meta anyway)
+                data["revoked_tokens"] = []
+
             return data
         except (json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to load auth file %s: %s", AUTH_FILE, exc)
@@ -361,7 +384,9 @@ def _add_to_revocation_list(jti: str, exp: int) -> None:
         data["revoked_tokens_meta"][jti] = exp
 
         # Also add to list for backwards compatibility
-        if "revoked_tokens" not in data:
+        if "revoked_tokens" not in data or not isinstance(
+            data["revoked_tokens"], list
+        ):
             data["revoked_tokens"] = []
         data["revoked_tokens"].append(jti)
 
@@ -377,6 +402,12 @@ def _clean_expired_revocations() -> None:
     revoked = data.get("revoked_tokens", [])
     meta = data.get("revoked_tokens_meta", {})
     current_time = int(time.time())
+
+    # Defensive: revoked_tokens must be a list; if corrupted (dict),
+    # skip individual-token cleanup (migration in _load_auth_data
+    # handles the dict case).
+    if not isinstance(revoked, list):
+        revoked = []
 
     # Remove expired tokens
     cleaned_revoked = []
@@ -453,6 +484,7 @@ def revoke_all_tokens() -> bool:
         # Clear revocation list since all tokens are now invalid
         data["revoked_tokens"] = []
         data["revoked_tokens_meta"] = {}
+        data["revoked_users"] = {}
 
         _save_auth_data(data)
         logger.info("All tokens revoked (JWT secret rotated)")
@@ -806,28 +838,37 @@ def _revoke_user_tokens(data: dict, user_id: str) -> None:
 
     Unlike rotating the global JWT secret (which invalidates ALL users),
     this only invalidates the specified user's tokens.
+
+    Per-user revocation entries are stored in ``revoked_users`` (a dict
+    keyed by user_id) to avoid conflicting with the existing
+    ``revoked_tokens`` list which stores individual jti strings.
     """
-    revoked = data.setdefault("revoked_tokens", {})
-    user_tokens = revoked.setdefault(user_id, [])
+    revoked_users = data.setdefault("revoked_users", {})
+    user_entries = revoked_users.setdefault(user_id, [])
     # Add a blanket revocation entry for this user with current timestamp
     import time
-    user_tokens.append({
-        "revoked_at": int(time.time()),
+    now = int(time.time())
+    user_entries.append({
+        "revoked_at": now,
         "reason": "password_change",
     })
     # Clean up old revocations (>30 days)
-    cutoff = int(time.time()) - 30 * 86400
-    data["revoked_tokens"] = {
-        uid: [r for r in tokens if r.get("revoked_at", 0) > cutoff]
-        for uid, tokens in revoked.items()
-        if any(r.get("revoked_at", 0) > cutoff for r in tokens)
+    cutoff = now - 30 * 86400
+    data["revoked_users"] = {
+        uid: [r for r in entries if r.get("revoked_at", 0) > cutoff]
+        for uid, entries in revoked_users.items()
+        if any(r.get("revoked_at", 0) > cutoff for r in entries)
     }
 
 
 def _is_user_token_revoked(data: dict, user_id: str, token_exp: int) -> bool:
-    """Check if a user's token issued before a password change is revoked."""
-    revoked = data.get("revoked_tokens", {})
-    user_revocations = revoked.get(user_id, [])
+    """Check if a user's token issued before a password change is revoked.
+
+    Per-user revocation data is stored in the ``revoked_users`` dict
+    (not ``revoked_tokens`` which is a list of jti strings).
+    """
+    revoked_users = data.get("revoked_users", {})
+    user_revocations = revoked_users.get(user_id, [])
     for rev in user_revocations:
         # If the token was issued before the revocation time, it's revoked
         if token_exp <= rev.get("revoked_at", 0):
