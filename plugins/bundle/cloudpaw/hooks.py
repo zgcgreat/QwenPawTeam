@@ -373,14 +373,15 @@ def setup_acp_auto_approve() -> None:
 def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
     None
 ):
-    """Monkey-patch QwenPawAgent to add cloudpaw tools and prompt sections."""
-    # IaC operations are delegated to iac-code via the built-in async
-    # `delegate_external_agent` tool (qwenpaw >= v1.1.7b1).  No CloudPaw-side
-    # ACP wrapper is required — the plugin only enables the built-in tool
-    # with `async_execution=True` via constants.py.
+    """Monkey-patch AgentBuilder to add cloudpaw tools and prompt sections.
+
+    In v2.0, QwenPawAgent._create_toolkit and _build_sys_prompt no longer
+    exist — agent construction is fully delegated to AgentBuilder. We patch
+    AgentBuilder.build_toolkit() for tools and register a prompt section
+    via PluginRegistry for the system prompt supplement.
+    """
     try:
         from qwenpaw.agents.react_agent import QwenPawAgent
-        from qwenpaw.runtime.tool_guard import GuardedFunctionTool
     except ImportError as exc:
         logger.error(
             "Cannot import QwenPawAgent; tool/prompt hooks skipped: %s",
@@ -388,8 +389,16 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
         )
         return
 
-    _original_create_toolkit = QwenPawAgent._create_toolkit
-    _original_build_sys_prompt = QwenPawAgent._build_sys_prompt
+    # ---- Tool injection via AgentBuilder.build_toolkit() ----
+    try:
+        from qwenpaw.runtime.builder import AgentBuilder
+        from qwenpaw.runtime.tool_guard import GuardedFunctionTool
+    except ImportError as exc:
+        logger.error(
+            "Cannot import AgentBuilder; tool hooks skipped: %s",
+            exc,
+        )
+        return
 
     def _append_tool(toolkit, tool_fn, agent_id):
         """Append a plugin tool to the toolkit's basic group, skipping if
@@ -403,28 +412,20 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
             GuardedFunctionTool(tool_fn, agent_id=agent_id),
         )
 
-    def _patched_create_toolkit(self, *args, **kwargs):
-        toolkit = _original_create_toolkit(
-            self,
-            *args,
-            **kwargs,
-        )
+    _original_build_toolkit = AgentBuilder.build_toolkit
 
-        agent_id = (
-            self._request_context.get("agent_id")
-            if self._request_context
-            else None
-        )
+    async def _patched_build_toolkit(self, agent_config, *, agent_id=None, **kwargs):
+        toolkit = await _original_build_toolkit(self, agent_config, agent_id=agent_id, **kwargs)
 
-        try:
-            from tools.proposal_choice import (
-                proposal_choice as _proposal_choice_fn,
-            )
-            from tools.manage_prd import (
-                manage_prd as _manage_prd_fn,
-            )
+        if agent_id == BUILTIN_ORCHESTRATION_AGENT_ID:
+            try:
+                from tools.proposal_choice import (
+                    proposal_choice as _proposal_choice_fn,
+                )
+                from tools.manage_prd import (
+                    manage_prd as _manage_prd_fn,
+                )
 
-            if agent_id == BUILTIN_ORCHESTRATION_AGENT_ID:
                 try:
                     _append_tool(toolkit, _proposal_choice_fn, agent_id)
                     logger.debug("Registered plugin tool: proposal_choice")
@@ -436,16 +437,14 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
                     logger.debug("Registered plugin tool: manage_prd")
                 except Exception as e:
                     logger.debug("manage_prd registration skipped: %s", e)
+            except Exception as e:
+                logger.warning(
+                    "Failed to register plugin tools: %s",
+                    e,
+                    exc_info=True,
+                )
 
-        except Exception as e:
-            logger.warning(
-                "Failed to register plugin tools: %s",
-                e,
-                exc_info=True,
-            )
-
-        # A2A tools: register for orchestration agent
-        if agent_id == BUILTIN_ORCHESTRATION_AGENT_ID:
+            # A2A tools: register for orchestration agent
             try:
                 from tools.a2a_list import a2a_list as _a2a_list_fn
                 from tools.a2a_call import a2a_call as _a2a_call_fn
@@ -461,7 +460,6 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
                     logger.debug("Registered plugin tool: a2a_call")
                 except Exception as e:
                     logger.debug("a2a_call registration skipped: %s", e)
-
             except Exception as e:
                 logger.warning(
                     "Failed to register A2A tools: %s",
@@ -471,27 +469,12 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
 
         return toolkit
 
-    def _patched_build_sys_prompt(self):
-        sys_prompt = _original_build_sys_prompt(self)
+    AgentBuilder.build_toolkit = _patched_build_toolkit
 
-        agent_id = (
-            self._request_context.get("agent_id")
-            if self._request_context
-            else None
-        )
+    # ---- Prompt supplement via PluginRegistry.register_prompt_section() ----
+    _register_cloudpaw_prompt_section()
 
-        # Runtime environment check for orchestrator
-        if agent_id == BUILTIN_ORCHESTRATION_AGENT_ID:
-            env_warning = _check_environment_ready()
-            if env_warning:
-                sys_prompt = env_warning + "\n\n" + sys_prompt
-                return sys_prompt
-
-        if agent_id == BUILTIN_ORCHESTRATION_AGENT_ID:
-            sys_prompt += "\n\n" + _CLOUDPAW_BASE_SUPPLEMENT
-
-        return sys_prompt
-
+    # ---- Interrupt patch (still works in v2.0) ----
     _original_interrupt = QwenPawAgent.interrupt
 
     async def _patched_interrupt(self, msg=None):
@@ -509,15 +492,62 @@ def setup_tool_and_prompt_hooks() -> (  # pylint: disable=too-many-statements
                     )
         await _original_interrupt(self, msg)
 
-    QwenPawAgent._create_toolkit = _patched_create_toolkit
-    QwenPawAgent._build_sys_prompt = _patched_build_sys_prompt
     QwenPawAgent.interrupt = _patched_interrupt
     logger.info(
-        "Patched QwenPawAgent with cloudpaw tools, prompt hooks, "
-        "and interrupt",
+        "[CloudPaw] Patched AgentBuilder.build_toolkit with cloudpaw tools, "
+        "registered prompt section, and interrupt",
     )
 
     _setup_a2a_query_rewrite()
+
+
+def _register_cloudpaw_prompt_section() -> None:
+    """Register the CloudPaw base_supplement prompt section.
+
+    Uses PluginRegistry.register_prompt_section() with agent_id filter
+    so the supplement is only added to the orchestration agent's prompt.
+    """
+    try:
+        from qwenpaw.plugins.registry import PluginRegistry
+    except ImportError:
+        logger.warning(
+            "Cannot import PluginRegistry; prompt section skipped",
+        )
+        return
+
+    def _cloudpaw_prompt_provider(agent):
+        """Return the cloudpaw base supplement, with env check."""
+        agent_id = getattr(agent, "agent_id", None) or getattr(
+            agent, "config", None
+        ) and getattr(agent.config, "agent_id", None)
+        if agent_id != BUILTIN_ORCHESTRATION_AGENT_ID:
+            return ""
+
+        # Runtime environment check for orchestrator
+        env_warning = _check_environment_ready()
+        if env_warning:
+            return env_warning
+
+        return _CLOUDPAW_BASE_SUPPLEMENT
+
+    try:
+        PluginRegistry().register_prompt_section(
+            plugin_id="cloudpaw",
+            name="cloudpaw_base_supplement",
+            after="workspace",
+            agent_id=BUILTIN_ORCHESTRATION_AGENT_ID,
+            provider=_cloudpaw_prompt_provider,
+        )
+        logger.info(
+            "[CloudPaw] Registered prompt section 'cloudpaw_base_supplement' "
+            "for agent '%s'",
+            BUILTIN_ORCHESTRATION_AGENT_ID,
+        )
+    except ValueError as e:
+        logger.warning(
+            "Failed to register prompt section (may already exist): %s",
+            e,
+        )
 
 
 # Bound methods captured by ``make_process_from_runner`` freeze the
