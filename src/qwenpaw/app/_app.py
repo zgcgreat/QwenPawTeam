@@ -1071,18 +1071,18 @@ if (
     # upstream route removal (here, at module level) and plugin route
     # registration (in _background_startup).  The plugin will replace
     # these with full-featured versions once loaded.
-    async def _temp_auth_status(_request):
+    async def _temp_auth_status():
         from starlette.responses import JSONResponse as _JSONR
         return _JSONR({"enabled": True, "has_users": False, "multi_user": True})
 
-    async def _temp_auth_login(_request):
+    async def _temp_auth_login():
         from starlette.responses import JSONResponse as _JSONR
         return _JSONR(
             {"detail": "Server is still starting up. Please try again shortly."},
             status_code=503,
         )
 
-    async def _temp_auth_catchall(_request):
+    async def _temp_auth_catchall():
         from starlette.responses import JSONResponse as _JSONR
         return _JSONR(
             {"detail": "Server is still starting up. Please try again shortly."},
