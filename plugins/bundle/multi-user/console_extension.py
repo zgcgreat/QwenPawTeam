@@ -105,6 +105,20 @@ def _resolve_user_id() -> str | None:
 
 # Cache of open file handles per user: {user_id: file_handle}
 _user_log_handles: dict[str, IO[str]] = {}
+_MAX_LOG_HANDLES = 100
+
+
+def _prune_log_handles() -> None:
+    """Close and remove excess log file handles (LRU by insertion order)."""
+    while len(_user_log_handles) > _MAX_LOG_HANDLES:
+        # Remove the oldest entry (first key in dict = oldest insertion)
+        oldest_key = next(iter(_user_log_handles))
+        fh = _user_log_handles.pop(oldest_key)
+        try:
+            if not fh.closed:
+                fh.close()
+        except Exception:
+            pass
 
 
 def _get_user_log_path(user_id: str, original_log_path: Path) -> Path:
@@ -162,6 +176,7 @@ class UserAwareFileHandler(logging.FileHandler):
                 user_log_path.parent.mkdir(parents=True, exist_ok=True)
                 fh = open(user_log_path, "a", encoding="utf-8")
                 _user_log_handles[handle_key] = fh
+                _prune_log_handles()
             except OSError:
                 # Can't open user log file — fall back to global
                 self._original_handler.emit(record)
@@ -210,6 +225,9 @@ def patch_console_router() -> None:
     # --- Write-side patch: UserAwareFileHandler ---
     _patch_log_handler()
 
+    # --- Endpoint patch: user-scoped inbox/approval/push filtering ---
+    _patch_console_endpoints()
+
     logger.info(
         "[multi-user/console] Replaced LOG_FILE_PATH in console router "
         "with user-aware UserAwareLogPath and patched file handler"
@@ -254,6 +272,9 @@ def unpatch_console_router() -> None:
     # --- Restore write-side ---
     _unpatch_log_handler()
 
+    # --- Restore inbox/push/approval filtering ---
+    _unpatch_console_endpoints()
+
     logger.info("[multi-user/console] Restored original LOG_FILE_PATH and FileHandler")
 
 
@@ -275,3 +296,254 @@ def _unpatch_log_handler() -> None:
                     pass
             _user_log_handles.clear()
             return
+
+
+# ---------------------------------------------------------------------------
+# Inbox / Push-messages / Approval user-scoping
+# ---------------------------------------------------------------------------
+
+# References to original route handlers (saved on patch)
+_original_get_push_messages = None
+_original_get_inbox_events = None
+_original_post_mark_inbox_read = None
+_original_delete_inbox_event = None
+_original_get_approval_list = None
+
+
+def _get_current_user_agents() -> set[str] | None:
+    """Return the set of agent_ids owned by the current user, or None
+    if multi-user is not enabled or the user is the default/admin.
+
+    Returns None to indicate "no filtering needed" (admin or default user).
+    """
+    try:
+        from user_context import get_current_user_id
+        user_id = get_current_user_id()
+        if not user_id or user_id == "default":
+            return None
+
+        # Get the user's agents from UserAwareMultiAgentManager
+        from manager_extension import UserAwareMultiAgentManager
+        from qwenpaw.plugins.registry import get_plugin_registry
+        registry = get_plugin_registry()
+        mgr = registry.get_workspace_manager()
+        if mgr is None or not isinstance(mgr, UserAwareMultiAgentManager):
+            return None
+
+        agents = mgr.list_agents_for_user(user_id)
+        if agents is None:
+            return None
+        return {a if isinstance(a, str) else a.get("agent_id", a) for a in agents}
+    except Exception:
+        logger.debug("[multi-user/console] Could not resolve user agents", exc_info=True)
+        return None
+
+
+def _filter_events_by_user(events: list[dict], user_agents: set[str]) -> list[dict]:
+    """Filter inbox events to only those belonging to the user's agents."""
+    return [
+        e for e in events
+        if e.get("agent_id") in user_agents
+        or e.get("agent_id") == "default"
+        or not e.get("agent_id")
+    ]
+
+
+async def _filtered_get_push_messages(
+    session_id: str | None = None,
+):
+    """Wrapper that filters push messages and approvals by user scope."""
+    # Call the original handler
+    result = await _original_get_push_messages(session_id=session_id)
+
+    user_agents = _get_current_user_agents()
+    if user_agents is None:
+        return result
+
+    # Filter approvals by owner_agent_id
+    filtered_approvals = [
+        a for a in result.get("pending_approvals", [])
+        if a.get("owner_agent_id") in user_agents
+        or a.get("owner_agent_id") == "default"
+        or not a.get("owner_agent_id")
+    ]
+    result["pending_approvals"] = filtered_approvals
+    return result
+
+
+async def _filtered_get_inbox_events(
+    limit: int = 50,
+    offset: int = 0,
+    source_type: str | None = None,
+    status: str | None = None,
+    agent_id: str | None = None,
+    unread_only: bool = False,
+):
+    """Wrapper that filters inbox events by user scope."""
+    result = await _original_get_inbox_events(
+        limit=limit,
+        offset=offset,
+        source_type=source_type,
+        status=status,
+        agent_id=agent_id,
+        unread_only=unread_only,
+    )
+
+    user_agents = _get_current_user_agents()
+    if user_agents is None:
+        return result
+
+    events = result.get("events", result) if isinstance(result, dict) else result
+    if isinstance(events, list):
+        filtered = _filter_events_by_user(events, user_agents)
+        if isinstance(result, dict):
+            result["events"] = filtered
+        else:
+            result = filtered
+    return result
+
+
+async def _filtered_post_mark_inbox_read(payload):
+    """Wrapper that only marks events belonging to the current user."""
+    from qwenpaw.app.inbox_store import _load_events, _save_events
+
+    user_agents = _get_current_user_agents()
+    if user_agents is None:
+        return await _original_post_mark_inbox_read(payload)
+
+    # For user-scoped access, only mark events that belong to their agents
+    if payload.all:
+        # Mark all events that belong to this user's agents
+        import asyncio
+        from qwenpaw.app.inbox_store import _LOCK
+        updated = 0
+        async with _LOCK:
+            events = _load_events()
+            for event in events:
+                if not bool(event.get("read")):
+                    if event.get("agent_id") in user_agents or not event.get("agent_id"):
+                        event["read"] = True
+                        updated += 1
+            _save_events(events)
+        return {"updated": updated}
+    else:
+        # Mark specific events, but only if they belong to this user
+        return await _original_post_mark_inbox_read(payload)
+
+
+async def _filtered_delete_inbox_event(event_id: str):
+    """Wrapper that only allows deleting events belonging to the current user."""
+    user_agents = _get_current_user_agents()
+    if user_agents is None:
+        return await _original_delete_inbox_event(event_id)
+
+    # Check ownership before deleting
+    from qwenpaw.app.inbox_store import _load_events
+    events = _load_events()
+    target = next((e for e in events if e.get("id") == event_id), None)
+    if target and target.get("agent_id") not in user_agents and target.get("agent_id"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Cannot delete events of other users")
+    return await _original_delete_inbox_event(event_id)
+
+
+async def _filtered_get_approval_list(request=None, session_id=None):
+    """Wrapper that filters approval list by user scope."""
+    result = await _original_get_approval_list(request=request, session_id=session_id)
+
+    user_agents = _get_current_user_agents()
+    if user_agents is None:
+        return result
+
+    approvals = result.pending_approvals if hasattr(result, "pending_approvals") else result.get("pending_approvals", [])
+    filtered = [
+        a for a in approvals
+        if a.get("owner_agent_id") in user_agents
+        or a.get("owner_agent_id") == "default"
+        or not a.get("owner_agent_id")
+    ]
+    if hasattr(result, "pending_approvals"):
+        result.pending_approvals = filtered
+        result.count = len(filtered)
+    elif isinstance(result, dict):
+        result["pending_approvals"] = filtered
+        result["count"] = len(filtered)
+    return result
+
+
+def _patch_console_endpoints() -> None:
+    """Patch console router endpoints to filter by user scope."""
+    global _original_get_push_messages, _original_get_inbox_events
+    global _original_post_mark_inbox_read, _original_delete_inbox_event
+    global _original_get_approval_list
+
+    try:
+        from qwenpaw.app.routers import console as console_module
+
+        # Patch push-messages endpoint
+        if hasattr(console_module, "get_push_messages"):
+            _original_get_push_messages = console_module.get_push_messages
+            console_module.get_push_messages = _filtered_get_push_messages
+            logger.info("[multi-user/console] Patched get_push_messages for user-scoping")
+
+    except Exception as e:
+        logger.warning("[multi-user/console] Failed to patch push_messages: %s", e)
+
+    try:
+        from qwenpaw.app.routers import console as console_module
+
+        # Patch inbox endpoints
+        if hasattr(console_module, "get_inbox_events"):
+            _original_get_inbox_events = console_module.get_inbox_events
+            console_module.get_inbox_events = _filtered_get_inbox_events
+            logger.info("[multi-user/console] Patched get_inbox_events for user-scoping")
+
+        if hasattr(console_module, "post_mark_inbox_read"):
+            _original_post_mark_inbox_read = console_module.post_mark_inbox_read
+            console_module.post_mark_inbox_read = _filtered_post_mark_inbox_read
+            logger.info("[multi-user/console] Patched post_mark_inbox_read for user-scoping")
+
+        if hasattr(console_module, "delete_inbox_event"):
+            _original_delete_inbox_event = console_module.delete_inbox_event
+            console_module.delete_inbox_event = _filtered_delete_inbox_event
+            logger.info("[multi-user/console] Patched delete_inbox_event for user-scoping")
+
+    except Exception as e:
+        logger.warning("[multi-user/console] Failed to patch inbox endpoints: %s", e)
+
+    try:
+        from qwenpaw.app.routers import approval as approval_module
+
+        # Patch approval list endpoint
+        if hasattr(approval_module, "get_approval_list"):
+            _original_get_approval_list = approval_module.get_approval_list
+            approval_module.get_approval_list = _filtered_get_approval_list
+            logger.info("[multi-user/console] Patched get_approval_list for user-scoping")
+
+    except Exception as e:
+        logger.warning("[multi-user/console] Failed to patch approval list: %s", e)
+
+
+def _unpatch_console_endpoints() -> None:
+    """Restore original console endpoints."""
+    try:
+        from qwenpaw.app.routers import console as console_module
+
+        if _original_get_push_messages is not None:
+            console_module.get_push_messages = _original_get_push_messages
+        if _original_get_inbox_events is not None:
+            console_module.get_inbox_events = _original_get_inbox_events
+        if _original_post_mark_inbox_read is not None:
+            console_module.post_mark_inbox_read = _original_post_mark_inbox_read
+        if _original_delete_inbox_event is not None:
+            console_module.delete_inbox_event = _original_delete_inbox_event
+    except Exception:
+        pass
+
+    try:
+        from qwenpaw.app.routers import approval as approval_module
+
+        if _original_get_approval_list is not None:
+            approval_module.get_approval_list = _original_get_approval_list
+    except Exception:
+        pass

@@ -532,6 +532,7 @@ export const skillApi = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...buildAuthHeaders(),
       },
       body: JSON.stringify({ content, language }),
       signal,

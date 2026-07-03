@@ -238,8 +238,15 @@ def patch_config_utils() -> None:
 #: need to be listed here — CLI commands and startup-only code can
 #: safely use the root config.
 _LOCAL_BINDING_MODULES: list[str] = [
+    # --- App core ---
     "qwenpaw.app._app",
     "qwenpaw.app.multi_agent_manager",
+    "qwenpaw.app.agent_context",
+    "qwenpaw.app.auth",
+    "qwenpaw.app.migration",
+    "qwenpaw.app.chats.utils",
+    "qwenpaw.app.channels.base",
+    # --- App routers (request-handling) ---
     "qwenpaw.app.routers.workspace",
     "qwenpaw.app.routers.tools",
     "qwenpaw.app.routers.config",
@@ -250,22 +257,42 @@ _LOCAL_BINDING_MODULES: list[str] = [
     "qwenpaw.app.routers.mcp",
     "qwenpaw.app.routers.backup",
     "qwenpaw.app.routers.plan",
-    "qwenpaw.app.agent_context",
+    "qwenpaw.app.routers.plugins",
+    "qwenpaw.app.routers.mcp_oauth",
+    "qwenpaw.app.routers.agent_status",
+    # --- App crons ---
+    "qwenpaw.app.crons.heartbeat",
+    # --- App runner ---
     "qwenpaw.app.runner.utils",
     "qwenpaw.app.runner.daemon_commands",
-    "qwenpaw.app.auth",
+    # --- App workspace ---
     "qwenpaw.app.workspace.workspace",
+    # --- Agents ---
     "qwenpaw.agents.prompt",
     "qwenpaw.agents.utils.message_processing",
     "qwenpaw.agents.memory.reme_light_memory_manager",
     "qwenpaw.agents.utils.audio_transcription",
     "qwenpaw.agents.tools.get_current_time",
+    "qwenpaw.agents.skill_system.store",
+    "qwenpaw.agents.skill_system.registry",
+    "qwenpaw.agents.acp.server",
+    "qwenpaw.agents.context.scroll.sync",
+    # --- Security ---
     "qwenpaw.security.tool_guard.engine",
     "qwenpaw.security.tool_guard.utils",
     "qwenpaw.security.tool_guard.guardians.shell_evasion_guardian",
     "qwenpaw.security.tool_guard.guardians.rule_guardian",
     "qwenpaw.security.tool_guard.guardians.file_guardian",
     "qwenpaw.security.skill_scanner",
+    # --- Backup (request-handling paths) ---
+    "qwenpaw.backup._utils.safe_swap",
+    "qwenpaw.backup._ops.restore",
+    "qwenpaw.backup._ops.create",
+    "qwenpaw.backup.orchestration",
+    # --- Drivers ---
+    "qwenpaw.drivers.time",
+    # --- Runtime ---
+    "qwenpaw.runtime.commands.daemon",
 ]
 
 

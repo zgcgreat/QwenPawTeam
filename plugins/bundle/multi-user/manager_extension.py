@@ -45,6 +45,8 @@ class UserAwareMultiAgentManager:
         self._users: Dict[str, Dict] = {}
         self._lock = asyncio.Lock()
         self._cleanup_tasks: Set[asyncio.Task] = set()
+        self._last_access: Dict[str, float] = {}  # user_id -> last access timestamp
+        self._max_idle_users = 50  # Max idle users before eviction
         logger.debug("UserAwareMultiAgentManager initialized")
 
     # -- User helpers --
@@ -52,7 +54,58 @@ class UserAwareMultiAgentManager:
     def _user_agents(self, user_id: str) -> Dict:
         if user_id not in self._users:
             self._users[user_id] = {}
+        self._touch_user(user_id)
         return self._users[user_id]
+
+    def _touch_user(self, user_id: str) -> None:
+        """Record that a user was recently active."""
+        import time
+        self._last_access[user_id] = time.time()
+
+    def _evict_idle_users_if_needed(self) -> None:
+        """Evict idle users if we exceed the limit.
+
+        Only evicts users with no running agents (idle cache entries).
+        Users with active agents are never evicted.
+        """
+        if len(self._users) <= self._max_idle_users:
+            return
+
+        import time
+        now = time.time()
+        # Sort by last access time (oldest first)
+        idle_candidates = sorted(
+            self._last_access.items(),
+            key=lambda x: x[1],
+        )
+
+        evicted = 0
+        target = len(self._users) - self._max_idle_users + 5  # evict a few extra
+        for uid, last_access in idle_candidates:
+            if evicted >= target:
+                break
+            # Don't evict the default user
+            if uid == "default":
+                continue
+            # Don't evict users with running agents
+            user_agents = self._users.get(uid, {})
+            if any(
+                getattr(ws, "_started", False)
+                for ws in user_agents.values()
+            ):
+                continue
+            # Evict this idle user
+            user_agents.clear()
+            self._users.pop(uid, None)
+            self._last_access.pop(uid, None)
+            evicted += 1
+
+        if evicted > 0:
+            logger.info(
+                "[multi-user/manager] Evicted %d idle users, "
+                "remaining: %d users",
+                evicted, len(self._users),
+            )
 
     def _current_user_id(self) -> str:
         try:
@@ -79,6 +132,8 @@ class UserAwareMultiAgentManager:
            has no config for the requested agent_id)
         """
         effective = user_id or self._current_user_id()
+        self._touch_user(effective)
+        self._evict_idle_users_if_needed()
         user_agents = self._user_agents(effective)
 
         logger.info(
